@@ -1,0 +1,15 @@
+{
+  "name": "htcommanderstation",
+  "version": "0.1.0",
+  "description": "This is a Amateur Radio (HAM Radio) tool for the UV-Pro, GA-5WB, VR-N76, VR-N7500, VR-N7600 radios",
+  "main": "app.js",
+  "keywords": [],
+  "author": "Ylian Saint-Hilaire",
+  "license": "Apache 2.0",
+  "devDependencies": {
+    "eslint": "^9.34.0"
+  },
+  "dependencies": {
+    "bluetooth-serial-port": "^3.0.2"
+  }
+}
