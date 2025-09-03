@@ -120,9 +120,93 @@ const RadioState = {
     ACCESS_DENIED: 8,
 };
 
+const RadioCommandErrors = {
+    SUCCESS: 0,
+    NOT_SUPPORTED: 1,
+    NOT_AUTHENTICATED: 2,
+    INSUFFICIENT_RESOURCES: 3,
+    AUTHENTICATING: 4,
+    INVALID_PARAMETER: 5,
+    INCORRECT_STATE: 6,
+    IN_PROGRESS: 7
+};
+
 class Radio extends EventEmitter {
-    constructor(...args) {
-        super(...args);
+    /**
+     * Returns true if the radio is ready to transmit (not in TX or RX)
+     */
+    IsTncFree() {
+        return (this.htStatus && this.htStatus.is_in_tx === false && this.htStatus.is_in_rx === false);
+    }
+
+    /**
+     * Internal outbound queue for TNC frames
+     */
+    _tncOutboundQueue = [];
+    _tncSending = false;
+
+    /**
+     * Send a TNC frame (AX.25 packet) over Bluetooth, fragmenting as needed.
+     * @param {object} opts - { channel_id, data }
+     */
+    sendTncFrame(opts) {
+        // Print the full frame data in HEX before fragmenting
+        const data = Buffer.isBuffer(opts.data) ? opts.data : Buffer.from(opts.data);
+        console.log(`[Radio] sendTncFrame() full data: ${bytesToHex(data)}`);
+        const MAX_MTU = 50;
+        if (!opts || typeof opts.channel_id !== 'number' || !opts.data) {
+            console.error('[Radio] sendTncFrame: Invalid arguments');
+            return;
+        }
+        const channel_id = opts.channel_id;
+        let offset = 0;
+        let fragment_id = 0;
+        const totalLen = data.length;
+        while (offset < totalLen) {
+            const remaining = totalLen - offset;
+            const fragLen = Math.min(remaining, MAX_MTU);
+            const fragData = data.slice(offset, offset + fragLen);
+            let flags = fragment_id & 0x3F;
+            if (offset + fragLen >= totalLen) flags |= 0x80; // final fragment
+            flags |= 0x40; // with_channel_id
+            const packet = Buffer.concat([
+                Buffer.from([flags]),
+                fragData,
+                Buffer.from([channel_id])
+            ]);
+            console.log(`[Radio] Queued TNC frame for send: ${bytesToHex(packet)}`);
+            this._tncOutboundQueue.push(packet);
+            offset += fragLen;
+            fragment_id++;
+        }
+        this._processTncQueue();
+    }
+
+    /**
+     * Process outbound TNC queue, send next packet if radio is free
+     */
+    _processTncQueue() {
+        if (this._tncSending || this._tncOutboundQueue.length === 0) return;
+        if (!this.IsTncFree()) return;
+        this._tncSending = true;
+        const packet = this._tncOutboundQueue.shift();
+        this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.HT_SEND_DATA, packet);
+        this._tncSending = false;
+        // If more packets, try to send next
+        if (this._tncOutboundQueue.length > 0) {
+            setTimeout(() => this._processTncQueue(), 10);
+        }
+    }
+
+    /**
+     * @param {string} macAddress
+     * @param {object} [options]
+     * @param {boolean} [options.loadChannels=true] - Whether to load channel info on connect
+     */
+    constructor(macAddress, options = {}) {
+        super();
+        this.macAddress = macAddress;
+        this.loadChannels = options.loadChannels !== undefined ? options.loadChannels : true;
         this._tncFrameAccumulator = null;
         this._tncExpectedFragmentId = 0;
     }
@@ -133,41 +217,41 @@ class Radio extends EventEmitter {
     updateState(newState) {
         this.state = newState;
     }
-        /**
-         * Connects to the radio using the provided MAC address.
-         * Returns a Promise that resolves when connected, or rejects on error.
-         * @param {string} macAddress - The MAC address of the radio device.
-         */
-        connect(macAddress) {
-            this.state = RadioState.CONNECTING;
-            this.gaiaClient = new GaiaClient(macAddress);
+    /**
+     * Connects to the radio using the provided MAC address.
+     * Returns a Promise that resolves when connected, or rejects on error.
+     * @param {string} macAddress - The MAC address of the radio device.
+     */
+    connect(macAddress) {
+        this.state = RadioState.CONNECTING;
+        this.gaiaClient = new GaiaClient(macAddress);
 
-            // Forward GaiaClient events to Radio using callback registration
-            this.gaiaClient.onConnected((connected) => {
-                if (connected) {
-                    this.onConnected();
-                } else {
-                    this.onDisconnected();
-                    this.emit('disconnected');
-                }
-            });
-            this.gaiaClient.onData((data) => {
-                this.onReceivedData(data);
-            });
+        // Forward GaiaClient events to Radio using callback registration
+        this.gaiaClient.onConnected((connected) => {
+            if (connected) {
+                this.onConnected();
+            } else {
+                this.onDisconnected();
+                this.emit('disconnected');
+            }
+        });
+        this.gaiaClient.onData((data) => {
+            this.onReceivedData(data);
+        });
 
-            // Return a promise that resolves/rejects on connection
-            return new Promise((resolve, reject) => {
-                this.gaiaClient.connect()
-                    .then(() => {
-                        this.state = RadioState.CONNECTED;
-                        resolve();
-                    })
-                    .catch((err) => {
-                        this.state = RadioState.UNABLE_TO_CONNECT;
-                        reject(err);
-                    });
-            });
-        }
+        // Return a promise that resolves/rejects on connection
+        return new Promise((resolve, reject) => {
+            this.gaiaClient.connect()
+                .then(() => {
+                    this.state = RadioState.CONNECTED;
+                    resolve();
+                })
+                .catch((err) => {
+                    this.state = RadioState.UNABLE_TO_CONNECT;
+                    reject(err);
+                });
+        });
+    }
     /**
      * Decodes the payload for HT_STATUS_CHANGED, matching the C# RadioHtStatus logic.
      * @param {Uint8Array|Buffer|Array} msg - The payload bytes (full message, not just sliced payload).
@@ -211,12 +295,11 @@ class Radio extends EventEmitter {
     }
 
     onConnected() {
-        this.updateState(RadioState.CONNECTED); // Update the state here
-        // Send initial commands after connection is established
-        // In this example, we'll only send GET_DEV_INFO for demonstration
+        this.updateState(RadioState.CONNECTED);
         this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.GET_DEV_INFO, 3);
-        // The C# code also sends READ_SETTINGS, READ_BSS_SETTINGS, and GET_BATTERY_LEVEL_AS_PERCENTAGE
-        // To be fully functional, you would add those commands here.
+        // Always request settings and BSS settings
+        this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.READ_SETTINGS, null);
+        this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.READ_BSS_SETTINGS, null);
     }
 
     onDisconnected() {
@@ -239,23 +322,32 @@ class Radio extends EventEmitter {
             console.log(`[Radio] Received command: ${Object.keys(RadioBasicCommand).find(key => RadioBasicCommand[key] === command)}`);
 
             switch (command) {
+                case RadioBasicCommand.HT_SEND_DATA:
+                    // Handle HT_SEND_DATA response (error code in value[4])
+                    const errorCode = value[4];
+                    let errorName = 'Unknown';
+                    for (const [key, val] of Object.entries(RadioCommandErrors)) {
+                        if (val === errorCode) { errorName = key; break; }
+                    }
+                    console.log(`[Radio] HT_SEND_DATA response: errorCode=${errorCode} (${errorName})`);
+                    // If radio is free and queue is not empty, send next packet
+                    if (this._tncOutboundQueue.length > 0) {
+                        setTimeout(() => this._processTncQueue(), 10);
+                    }
+                    break;
                 case RadioBasicCommand.GET_DEV_INFO:
-                    // Pass the full value (including commandGroup/command) to decodeDevInfo
                     this.info = RadioCodec.decodeDevInfo(value);
                     this.updateState(RadioState.CONNECTED);
                     this.emit('infoUpdate', { type: 'Info', value: this.info });
-                    // Register for HT_STATUS_CHANGED notifications
                     this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.REGISTER_NOTIFICATION, RadioNotification.HT_STATUS_CHANGED);
-                    // Request radio settings
-                    this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.READ_SETTINGS, null);
-                    // Request BSS settings
-                    this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.READ_BSS_SETTINGS, null);
-                    // Request all channels
-                    if (this.info && typeof this.info.channel_count === 'number') {
+                    // Only request channels if loadChannels is true
+                    if (this.loadChannels && this.info && typeof this.info.channel_count === 'number') {
                         this.channels = new Array(this.info.channel_count);
                         for (let i = 0; i < this.info.channel_count; ++i) {
                             this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.READ_RF_CH, i);
                         }
+                    } else {
+                        this.channels = null;
                     }
                     break;
                 case RadioBasicCommand.READ_BSS_SETTINGS:
@@ -292,6 +384,7 @@ class Radio extends EventEmitter {
                             // Decode HT status using the C# logic
                             this.htStatus = RadioCodec.decodeHtStatus(value);
                             this.emit('infoUpdate', { type: 'HtStatus', value: this.htStatus });
+                            this._processTncQueue();
                             break;
                         case RadioNotification.HT_SETTINGS_CHANGED:
                             // Decode HT settings using the C# logic
@@ -310,7 +403,8 @@ class Radio extends EventEmitter {
                             fragment.time = new Date();
                             if (with_channel_id && value.length > 6) {
                                 fragment.channel_id = value[value.length - 1];
-                                if (this.channels && this.channels[fragment.channel_id] && this.channels[fragment.channel_id].name_str) {
+                                // Only set channel_name if channels are loaded
+                                if (this.loadChannels && this.channels && this.channels[fragment.channel_id] && this.channels[fragment.channel_id].name_str) {
                                     fragment.channel_name = this.channels[fragment.channel_id].name_str;
                                 } else {
                                     fragment.channel_name = String(fragment.channel_id);
@@ -319,10 +413,10 @@ class Radio extends EventEmitter {
                                 fragment.channel_id = this.htStatus.curr_ch_id;
                                 if (fragment.channel_id >= 254) {
                                     fragment.channel_name = 'NOAA';
-                                } else if (this.channels && this.channels.length > fragment.channel_id && this.channels[fragment.channel_id] && this.channels[fragment.channel_id].name_str) {
+                                } else if (this.loadChannels && this.channels && this.channels.length > fragment.channel_id && this.channels[fragment.channel_id] && this.channels[fragment.channel_id].name_str) {
                                     fragment.channel_name = this.channels[fragment.channel_id].name_str;
                                 } else {
-                                    fragment.channel_name = '';
+                                    fragment.channel_name = String(fragment.channel_id);
                                 }
                             } else {
                                 fragment.channel_id = -1;
@@ -370,7 +464,7 @@ class Radio extends EventEmitter {
                                 packet.time = new Date();
                                 this._tncFrameAccumulator = null;
                                 this._tncExpectedFragmentId = 0;
-                                this.emit('infoUpdate', { type: 'TncDataFragment', value: packet });
+                                this.emit('data', packet);
                             }
                             break;
                         default:
