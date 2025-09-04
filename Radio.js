@@ -131,7 +131,53 @@ const RadioCommandErrors = {
     IN_PROGRESS: 7
 };
 
+const RadioPowerStatus = {
+    UNKNOWN: 0,
+    BATTERY_LEVEL: 1,
+    BATTERY_VOLTAGE: 2,
+    RC_BATTERY_LEVEL: 3,
+    BATTERY_LEVEL_AS_PERCENTAGE: 4
+}
+
 class Radio extends EventEmitter {
+    /**
+     * Request battery status (internal helper)
+     * @param {number} powerStatus - 1: level, 2: voltage, 3: RC level, 4: percentage
+     */
+    requestPowerStatus(powerStatus) {
+        const data = Buffer.alloc(2);
+        data[1] = RadioPowerStatus[powerStatus];
+        this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.READ_STATUS, data);
+    }
+
+    /**
+     * Poll battery level (raw)
+     */
+    getBatteryLevel() {
+        this.requestPowerStatus('BATTERY_LEVEL');
+    }
+
+    /**
+     * Poll battery voltage
+     */
+    getBatteryVoltage() {
+        this.requestPowerStatus('BATTERY_VOLTAGE');
+    }
+
+    /**
+     * Poll RC battery level
+     */
+    getRcBatteryLevel() {
+        this.requestPowerStatus('RC_BATTERY_LEVEL');
+    }
+
+    /**
+     * Poll battery status as percentage
+     */
+    getBatteryLevelAtPercentage() {
+        this.requestPowerStatus('BATTERY_LEVEL_AS_PERCENTAGE');
+    }
+    
     /**
      * Returns true if the radio is ready to transmit (not in TX or RX)
      */
@@ -311,7 +357,7 @@ class Radio extends EventEmitter {
     }
 
     onReceivedData(value) {
-        console.log(`[Radio] Received data: ${bytesToHex(value)}`);
+        //console.log(`[Radio] Received data: ${bytesToHex(value)}`);
         this.emit('rawCommand', value);
 
         const commandGroup = getShort(value, 0);
@@ -319,7 +365,7 @@ class Radio extends EventEmitter {
             const command = getShort(value, 2) & 0x7FFF;
             const payload = value.slice(4);
 
-            console.log(`[Radio] Received command: ${Object.keys(RadioBasicCommand).find(key => RadioBasicCommand[key] === command)}`);
+            //console.log(`[Radio] Received command: ${Object.keys(RadioBasicCommand).find(key => RadioBasicCommand[key] === command)}`);
 
             switch (command) {
                 case RadioBasicCommand.HT_SEND_DATA:
@@ -376,6 +422,38 @@ class Radio extends EventEmitter {
                     this.settings = RadioCodec.decodeRadioSettings(value);
                     this.emit('infoUpdate', { type: 'Settings', value: this.settings });
                     break;
+                case RadioBasicCommand.READ_STATUS: {
+                    // Battery status decoding (C# logic port)
+                    if (value.length > 7) {
+                        const powerStatus = getShort(value, 5);
+                        switch (powerStatus) {
+                            case 1: // BATTERY_LEVEL
+                                const batteryLevel = value[7];
+                                this.emit('infoUpdate', { type: 'BatteryLevel', value: batteryLevel });
+                                console.log(`[Radio] BatteryLevel: ${batteryLevel}`);
+                                break;
+                            case 2: // BATTERY_VOLTAGE
+                                const batteryVoltage = getShort(value, 7) / 1000;
+                                this.emit('infoUpdate', { type: 'BatteryVoltage', value: batteryVoltage });
+                                console.log(`[Radio] BatteryVoltage: ${batteryVoltage}`);
+                                break;
+                            case 3: // RC_BATTERY_LEVEL
+                                const rcBatteryLevel = value[7];
+                                this.emit('infoUpdate', { type: 'RcBatteryLevel', value: rcBatteryLevel });
+                                console.log(`[Radio] RcBatteryLevel: ${rcBatteryLevel}`);
+                                break;
+                            case 4: // BATTERY_LEVEL_AS_PERCENTAGE
+                                const batteryPercent = value[7];
+                                this.emit('infoUpdate', { type: 'BatteryAsPercentage', value: batteryPercent });
+                                console.log(`[Radio] BatteryAsPercentage: ${batteryPercent}`);
+                                break;
+                            default:
+                                console.log(`[Radio] Unexpected Power Status: ${powerStatus}`);
+                                break;
+                        }
+                    }
+                    break;
+                }
                 case RadioBasicCommand.EVENT_NOTIFICATION:
                     const notificationType = payload[0];
                     console.log(`[Radio] Received notification: ${Object.keys(RadioNotification).find(key => RadioNotification[key] === notificationType)}`);

@@ -1,7 +1,18 @@
 // This module provides a reusable class for managing a Bluetooth connection
 // to a GAIA-compatible device using the 'bluetooth-serial-port' library.
 
-const bluetooth = require('bluetooth-serial-port');
+let bluetooth;
+try {
+    bluetooth = require('bluetooth-serial-port');
+} catch (err) {
+    if (err.code === 'MODULE_NOT_FOUND') {
+        console.error('[GaiaClient] Required module "bluetooth-serial-port" is missing.');
+        console.error('[GaiaClient] Please run: npm install bluetooth-serial-port');
+        process.exit(1);
+    } else {
+        throw err;
+    }
+}
 
 // --- GAIA Frame Constants ---
 const GAIA_SYNC = 0xFF;
@@ -104,7 +115,7 @@ class GaiaClient {
                 if (err) {
                     console.error('Failed to write to port:', err);
                 } else {
-                    console.log(`Command sent: ${gaiaFrame.toString('hex')}`);
+                    //console.log(`Command sent: ${gaiaFrame.toString('hex')}`);
                 }
             });
         } else {
