@@ -288,237 +288,11 @@ radio.on('positionUpdate', (position) => {
 radio.connect(RADIO_MAC_ADDRESS)
     .then(() => {
         console.log('Successfully connected to radio!');
-        // (removed generic UVPro Radio discovery sensor - individual sensors are published separately)
 
-        // Publish Home Assistant MQTT Discovery config for Battery sensor at startup
+        // Publish Home Assistant MQTT Discovery configs
         if (mqttReporter && config.MQTT_TOPIC) {
-            const uniqueId = `uvpro_radio_${RADIO_STATIONID}`;
-            const batterySensorTopic = `homeassistant/sensor/uvpro_radio_battery/config`;
-            const batteryStateTopic = `${config.MQTT_TOPIC}/battery`;
-            const batterySensorConfig = {
-                name: 'UVPro Radio Battery',
-                state_topic: batteryStateTopic,
-                unique_id: `${uniqueId}_battery`,
-                device: {
-                    identifiers: [uniqueId],
-                    name: 'UVPro Radio',
-                    manufacturer: 'BTech',
-                    model: 'UV-Pro'
-                },
-                unit_of_measurement: '%',
-                value_template: '{{ value_json.battery }}',
-                icon: 'mdi:battery'
-            };
-            mqttReporter.publishStatus(batterySensorTopic, batterySensorConfig);
-            console.log('[MQTT] Published Home Assistant Battery sensor discovery config.');
-
-            // Publish Home Assistant MQTT Discovery config for Volume number entity
-            const volumeNumberTopic = `homeassistant/number/uvpro_radio_volume/config`;
-            const volumeStateTopic = `${config.MQTT_TOPIC}/volume`;
-            const volumeCommandTopic = `${config.MQTT_TOPIC}/volume/set`;
-            const volumeNumberConfig = {
-                name: 'UVPro Radio Volume',
-                state_topic: volumeStateTopic,
-                command_topic: volumeCommandTopic,
-                unique_id: `${uniqueId}_volume`,
-                device: {
-                    identifiers: [uniqueId],
-                    name: 'UVPro Radio',
-                    manufacturer: 'BTech',
-                    model: 'UV-Pro'
-                },
-                min: 0,
-                max: 15,
-                step: 1,
-                value_template: '{{ value_json.volume }}',
-                icon: 'mdi:volume-high'
-            };
-            mqttReporter.publishStatus(volumeNumberTopic, volumeNumberConfig);
-            console.log('[MQTT] Published Home Assistant Volume number discovery config.');
-
-            // Publish Home Assistant MQTT Discovery config for Squelch number entity
-            const squelchNumberTopic = `homeassistant/number/uvpro_radio_squelch/config`;
-            const squelchStateTopic = `${config.MQTT_TOPIC}/squelch`;
-            const squelchCommandTopic = `${config.MQTT_TOPIC}/squelch/set`;
-            const squelchNumberConfig = {
-                name: 'UVPro Radio Squelch',
-                state_topic: squelchStateTopic,
-                command_topic: squelchCommandTopic,
-                unique_id: `${uniqueId}_squelch`,
-                device: {
-                    identifiers: [uniqueId],
-                    name: 'UVPro Radio',
-                    manufacturer: 'BTech',
-                    model: 'UV-Pro'
-                },
-                min: 0,
-                max: 15,
-                step: 1,
-                value_template: '{{ value_json.squelch }}',
-                icon: 'mdi:volume-off'
-            };
-            mqttReporter.publishStatus(squelchNumberTopic, squelchNumberConfig);
-            console.log('[MQTT] Published Home Assistant Squelch number discovery config.');
-
-            // Publish Home Assistant MQTT Discovery config for Scan switch entity
-            const scanSwitchTopic = `homeassistant/switch/uvpro_radio_scan/config`;
-            const scanStateTopic = `${config.MQTT_TOPIC}/scan`;
-            const scanCommandTopic = `${config.MQTT_TOPIC}/scan/set`;
-            const scanSwitchConfig = {
-                name: 'UVPro Radio Scan',
-                state_topic: scanStateTopic,
-                command_topic: scanCommandTopic,
-                unique_id: `${uniqueId}_scan`,
-                device: {
-                    identifiers: [uniqueId],
-                    name: 'UVPro Radio',
-                    manufacturer: 'BTech',
-                    model: 'UV-Pro'
-                },
-                payload_on: 'ON',
-                payload_off: 'OFF',
-                value_template: '{{ value_json.scan }}',
-                icon: 'mdi:radar'
-            };
-            mqttReporter.publishStatus(scanSwitchTopic, scanSwitchConfig);
-            console.log('[MQTT] Published Home Assistant Scan switch discovery config.');
-
-            // Publish Home Assistant MQTT Discovery config for Double Channel switch entity
-            const doubleChannelSwitchTopic = `homeassistant/switch/uvpro_radio_double_channel/config`;
-            const doubleChannelStateTopic = `${config.MQTT_TOPIC}/double_channel`;
-            const doubleChannelCommandTopic = `${config.MQTT_TOPIC}/double_channel/set`;
-            const doubleChannelSwitchConfig = {
-                name: 'UVPro Radio Dual Watch',
-                state_topic: doubleChannelStateTopic,
-                command_topic: doubleChannelCommandTopic,
-                unique_id: `${uniqueId}_double_channel`,
-                device: {
-                    identifiers: [uniqueId],
-                    name: 'UVPro Radio',
-                    manufacturer: 'BTech',
-                    model: 'UV-Pro'
-                },
-                payload_on: 'ON',
-                payload_off: 'OFF',
-                value_template: '{{ value_json.double_channel }}',
-                icon: 'mdi:swap-horizontal'
-            };
-            mqttReporter.publishStatus(doubleChannelSwitchTopic, doubleChannelSwitchConfig);
-            console.log('[MQTT] Published Home Assistant Dual Watch switch discovery config.');
-        }
-
-        // Publish GPS enable/disable switch
-        if (mqttReporter && config.MQTT_TOPIC) {
-            const uniqueId = `uvpro_radio_${RADIO_STATIONID}`;
-            const gpsSwitchTopic = `homeassistant/switch/uvpro_radio_gps/config`;
-            const gpsCommandTopic = `${config.MQTT_TOPIC}/gps/set`;
-            const gpsStateTopic = `${config.MQTT_TOPIC}/gps`;
-            const gpsSwitchConfig = {
-                name: 'UVPro Radio GPS',
-                state_topic: gpsStateTopic,
-                command_topic: gpsCommandTopic,
-                unique_id: `${uniqueId}_gps`,
-                device: {
-                    identifiers: [uniqueId],
-                    name: 'UVPro Radio',
-                    manufacturer: 'BTech',
-                    model: 'UV-Pro'
-                },
-                payload_on: 'ON',
-                payload_off: 'OFF',
-                value_template: '{{ value_json.gps }}',
-                icon: 'mdi:crosshairs-gps'
-            };
-            mqttReporter.publishStatus(gpsSwitchTopic, gpsSwitchConfig);
-            console.log('[MQTT] Published Home Assistant GPS switch discovery config.');
-
-            // Publish initial GPS state as OFF since GPS starts disabled
-            mqttReporter.publishStatus(gpsStateTopic, { gps: 'OFF' });
-        }
-
-        // Publish GPS position sensors (simplified without availability topics)
-        if (mqttReporter && config.MQTT_TOPIC) {
-            const uniqueId = `uvpro_radio_${RADIO_STATIONID}`;
-            const gpsStateTopic = `${config.MQTT_TOPIC}/gps_position`;
-
-            // GPS Latitude sensor
-            const latSensorTopic = `homeassistant/sensor/uvpro_radio_gps_lat/config`;
-            const latSensorConfig = {
-                name: 'UVPro Radio GPS Latitude',
-                state_topic: gpsStateTopic,
-                unique_id: `${uniqueId}_gps_lat`,
-                device: {
-                    identifiers: [uniqueId],
-                    name: 'UVPro Radio',
-                    manufacturer: 'BTech',
-                    model: 'UV-Pro'
-                },
-                value_template: '{{ value_json.latitude }}',
-                unit_of_measurement: '°',
-                icon: 'mdi:latitude'
-            };
-            mqttReporter.publishStatus(latSensorTopic, latSensorConfig);
-
-            // GPS Longitude sensor
-            const lngSensorTopic = `homeassistant/sensor/uvpro_radio_gps_lng/config`;
-            const lngSensorConfig = {
-                name: 'UVPro Radio GPS Longitude',
-                state_topic: gpsStateTopic,
-                unique_id: `${uniqueId}_gps_lng`,
-                device: {
-                    identifiers: [uniqueId],
-                    name: 'UVPro Radio',
-                    manufacturer: 'BTech',
-                    model: 'UV-Pro'
-                },
-                value_template: '{{ value_json.longitude }}',
-                unit_of_measurement: '°',
-                icon: 'mdi:longitude'
-            };
-            mqttReporter.publishStatus(lngSensorTopic, lngSensorConfig);
-
-            // GPS Altitude sensor
-            const altSensorTopic = `homeassistant/sensor/uvpro_radio_gps_alt/config`;
-            const altSensorConfig = {
-                name: 'UVPro Radio GPS Altitude',
-                state_topic: gpsStateTopic,
-                unique_id: `${uniqueId}_gps_alt`,
-                device: {
-                    identifiers: [uniqueId],
-                    name: 'UVPro Radio',
-                    manufacturer: 'BTech',
-                    model: 'UV-Pro'
-                },
-                value_template: '{{ value_json.altitude }}',
-                unit_of_measurement: 'm',
-                icon: 'mdi:altimeter'
-            };
-            mqttReporter.publishStatus(altSensorTopic, altSensorConfig);
-
-            // GPS Lock status sensor (using regular sensor for text display)
-            const lockSensorTopic = `homeassistant/sensor/uvpro_radio_gps_lock/config`;
-            const lockSensorConfig = {
-                name: 'UVPro Radio GPS Lock',
-                state_topic: gpsStateTopic,
-                unique_id: `${uniqueId}_gps_lock`,
-                device: {
-                    identifiers: [uniqueId],
-                    name: 'UVPro Radio',
-                    manufacturer: 'BTech',
-                    model: 'UV-Pro'
-                },
-                value_template: '{{ value_json.lock_status }}',
-                icon: 'mdi:satellite-variant'
-            };
-            mqttReporter.publishStatus(lockSensorTopic, lockSensorConfig);
-
-            console.log('[MQTT] Published Home Assistant GPS sensors discovery config.');
-
-            // Publish initial "GPS disabled" position data 
-            publishGpsDisabledState();
-        }
-
-        // Poll battery percentage and volume immediately and every minute while connected
+            mqttReporter.publishAllDiscoveryConfigs();
+        }        // Poll battery percentage and volume immediately and every minute while connected
         let batteryPollInterval = null;
         function pollStatus() {
             if (radio) {
@@ -541,7 +315,7 @@ radio.connect(RADIO_MAC_ADDRESS)
             if (radio.state === 3) { // RadioState.CONNECTED
                 pollStatus();
             }
-        }, 60000);
+        }, 30000);
         radio.on('disconnected', () => {
             if (batteryPollInterval) {
                 clearInterval(batteryPollInterval);
@@ -826,245 +600,33 @@ function getFirmwareVersionString(soft_ver) {
 // Helper to publish Firmware Version sensor
 function publishFirmwareVersionSensor(devInfo) {
     if (!mqttReporter || !devInfo || typeof devInfo.soft_ver !== 'number') return;
-    const uniqueId = `uvpro_radio_${RADIO_STATIONID}`;
-    const fwSensorTopic = `homeassistant/sensor/uvpro_radio_firmware/config`;
-    const fwStateTopic = `${config.MQTT_TOPIC}/firmware_version`;
-    const fwSensorConfig = {
-        name: 'UVPro Radio Firmware Version',
-        state_topic: fwStateTopic,
-        unique_id: `${uniqueId}_firmware`,
-        device: {
-            identifiers: [uniqueId],
-            name: 'UVPro Radio',
-            manufacturer: 'BTech',
-            model: 'UV-Pro'
-        },
-        value_template: '{{ value_json.firmware_version }}',
-        icon: 'mdi:chip'
-    };
     const versionString = getFirmwareVersionString(devInfo.soft_ver);
-    mqttReporter.publishStatus(fwSensorTopic, fwSensorConfig);
-    mqttReporter.publishStatus(fwStateTopic, { firmware_version: versionString });
-    console.log('[MQTT] Published Firmware Version sensor:', versionString);
+    mqttReporter.publishFirmwareVersionSensor(versionString);
 }
 
 // Helper to publish GPS "disabled" state when GPS is disabled
 function publishGpsDisabledState() {
     if (!mqttReporter || !config.MQTT_TOPIC) return;
-    
-    const gpsPositionTopic = `${config.MQTT_TOPIC}/gps_position`;
-    // Publish "GPS disabled" state with clear indication
-    const disabledPositionData = {
-        latitude: null,
-        longitude: null,
-        altitude: null,
-        speed: null,
-        heading: null,
-        accuracy: null,
-        locked: false,
-        lock_status: "GPS Disabled",
-        latitude_dms: "GPS Disabled",
-        longitude_dms: "GPS Disabled",
-        timestamp: new Date().toISOString()
-    };
-    mqttReporter.publishStatus(gpsPositionTopic, disabledPositionData);
-    //console.log(`[MQTT] DEBUG: Published GPS disabled state to ${gpsPositionTopic}`);
-}// Helper to republish GPS sensor discovery configs (useful for troubleshooting)
-function republishGpsDiscoveryConfigs() {
-    if (!mqttReporter || !config.MQTT_TOPIC) return;
-
-    const uniqueId = `uvpro_radio_${RADIO_STATIONID}`;
-    const gpsStateTopic = `${config.MQTT_TOPIC}/gps_position`;
-
-    // Re-publish all GPS sensor discovery configs (simplified without availability)
-    const sensors = [
-        {
-            topic: `homeassistant/sensor/uvpro_radio_gps_lat/config`,
-            config: {
-                name: 'UVPro Radio GPS Latitude',
-                state_topic: gpsStateTopic,
-                unique_id: `${uniqueId}_gps_lat`,
-                device: {
-                    identifiers: [uniqueId],
-                    name: 'UVPro Radio',
-                    manufacturer: 'BTech',
-                    model: 'UV-Pro'
-                },
-                value_template: '{{ value_json.latitude }}',
-                unit_of_measurement: '°',
-                icon: 'mdi:latitude'
-            }
-        },
-        {
-            topic: `homeassistant/sensor/uvpro_radio_gps_lng/config`,
-            config: {
-                name: 'UVPro Radio GPS Longitude',
-                state_topic: gpsStateTopic,
-                unique_id: `${uniqueId}_gps_lng`,
-                device: {
-                    identifiers: [uniqueId],
-                    name: 'UVPro Radio',
-                    manufacturer: 'BTech',
-                    model: 'UV-Pro'
-                },
-                value_template: '{{ value_json.longitude }}',
-                unit_of_measurement: '°',
-                icon: 'mdi:longitude'
-            }
-        },
-        {
-            topic: `homeassistant/sensor/uvpro_radio_gps_alt/config`,
-            config: {
-                name: 'UVPro Radio GPS Altitude',
-                state_topic: gpsStateTopic,
-                unique_id: `${uniqueId}_gps_alt`,
-                device: {
-                    identifiers: [uniqueId],
-                    name: 'UVPro Radio',
-                    manufacturer: 'BTech',
-                    model: 'UV-Pro'
-                },
-                value_template: '{{ value_json.altitude }}',
-                unit_of_measurement: 'm',
-                icon: 'mdi:altimeter'
-            }
-        },
-        {
-            topic: `homeassistant/sensor/uvpro_radio_gps_lock/config`,
-            config: {
-                name: 'UVPro Radio GPS Lock',
-                state_topic: gpsStateTopic,
-                unique_id: `${uniqueId}_gps_lock`,
-                device: {
-                    identifiers: [uniqueId],
-                    name: 'UVPro Radio',
-                    manufacturer: 'BTech',
-                    model: 'UV-Pro'
-                },
-                value_template: '{{ value_json.lock_status }}',
-                icon: 'mdi:satellite-variant'
-            }
-        }
-    ];
-
-    sensors.forEach(sensor => {
-        mqttReporter.publishStatus(sensor.topic, sensor.config);
-    });
-
-    console.log('[MQTT] Republished GPS sensor discovery configs');
+    mqttReporter.publishGpsDisabledState();
 }
-
-// (moved shared state declarations earlier)
 
 // Helper to publish VFO select sensors (VFO1, VFO2)
 function publishVfoSelects(channels, channelAIndex, channelBIndex) {
     if (!mqttReporter || !channels || !Array.isArray(channels)) return;
-    // Build a dense options array like '1: Name' by iterating indices so holes are filled
-    const uniqueId = `uvpro_radio_${RADIO_STATIONID}`;
-    const vfo1SensorTopic = `homeassistant/select/uvpro_radio_vfo1/config`;
-    const vfo2SensorTopic = `homeassistant/select/uvpro_radio_vfo2/config`;
-    const vfo1StateTopic = `${config.MQTT_TOPIC}/vfo1`;
-    const vfo2StateTopic = `${config.MQTT_TOPIC}/vfo2`;
-    const vfo1CommandTopic = `${config.MQTT_TOPIC}/vfo1/set`;
-    const vfo2CommandTopic = `${config.MQTT_TOPIC}/vfo2/set`;
-
-    // Build a dense options array like '1: Name' by iterating indices so holes are filled.
-    // Prefer the provided channels' name_str, but if missing, try to look up radio.channels (may arrive later).
-    const options = [];
-    for (let idx = 0; idx < channels.length; idx++) {
-        const ch = channels[idx];
-        let name = (ch && ch.name_str) ? ch.name_str : '';
-        // fallback to radio.channels if available
-        if (!name && radio && radio.channels && radio.channels[idx] && radio.channels[idx].name_str) {
-            name = radio.channels[idx].name_str;
-        }
-        if (!name) name = `Channel ${idx + 1}`;
-        options.push(`${idx + 1}: ${name}`);
-    }
-
-    // Log a concise summary to help debugging
-    //console.log(`[App] publishVfoSelects: channels.length=${channels.length}, options.length=${options.length}`);
-    //console.log('[App] publishVfoSelects: options[0..9]=', options.slice(0, Math.min(10, options.length)));
-
-    // If options haven't changed since last publish, skip republishing
-    const optionsKey = JSON.stringify(options);
+    
+    // Check if options haven't changed since last publish to skip republishing
+    const optionsKey = JSON.stringify(channels.map((ch, idx) => `${idx + 1}: ${(ch && ch.name_str) || `Channel ${idx + 1}`}`));
     if (lastPublishedVfoOptions === optionsKey) {
-        //console.log('[App] publishVfoSelects: options unchanged, skipping republish.');
         return;
     }
-
-    const vfo1Config = {
-        name: 'UVPro Radio VFO1',
-        command_topic: vfo1CommandTopic,
-        state_topic: vfo1StateTopic,
-        unique_id: `${uniqueId}_vfo1`,
-        device: {
-            identifiers: [uniqueId],
-            name: 'UVPro Radio',
-            manufacturer: 'BTech',
-            model: 'UV-Pro'
-        },
-        options: options,
-        value_template: '{{ value_json.vfo }}'
-    };
-
-    const vfo2Config = Object.assign({}, vfo1Config, {
-        name: 'UVPro Radio VFO2',
-        command_topic: vfo2CommandTopic,
-        state_topic: vfo2StateTopic,
-        unique_id: `${uniqueId}_vfo2`
-    });
-
-    mqttReporter.publishStatus(vfo1SensorTopic, vfo1Config);
-    mqttReporter.publishStatus(vfo2SensorTopic, vfo2Config);
-
-    // Publish initial states
-    const selA = options[(typeof channelAIndex === 'number' ? channelAIndex : 0)] || options[0];
-    const selB = options[(typeof channelBIndex === 'number' ? channelBIndex : 0)] || options[0];
-    mqttReporter.publishStatus(vfo1StateTopic, { vfo: selA });
-    mqttReporter.publishStatus(vfo2StateTopic, { vfo: selB });
-    //console.log('[MQTT] Published VFO1/VFO2 select discovery and initial state.');
-
+    
+    mqttReporter.publishVfoSelects(channels, channelAIndex, channelBIndex);
     lastPublishedVfoOptions = optionsKey;
 }
 
 // Helper to publish Region select sensor
 function publishRegionSelect(regionCount) {
     if (!mqttReporter || typeof regionCount !== 'number' || regionCount <= 0) return;
-
-    const uniqueId = `uvpro_radio_${RADIO_STATIONID}`;
-    const regionSelectTopic = `homeassistant/select/uvpro_radio_region/config`;
-    const regionStateTopic = `${config.MQTT_TOPIC}/region_select`;
-    const regionCommandTopic = `${config.MQTT_TOPIC}/region_select/set`;
-
-    // Build options like "Region 1", "Region 2", etc.
-    const options = [];
-    for (let i = 1; i <= regionCount; i++) {
-        options.push(`Region ${i}`);
-    }
-
-    const regionSelectConfig = {
-        name: 'UVPro Radio Region',
-        command_topic: regionCommandTopic,
-        state_topic: regionStateTopic,
-        unique_id: `${uniqueId}_region_select`,
-        device: {
-            identifiers: [uniqueId],
-            name: 'UVPro Radio',
-            manufacturer: 'BTech',
-            model: 'UV-Pro'
-        },
-        options: options,
-        value_template: '{{ value_json.region }}',
-        icon: 'mdi:map'
-    };
-
-    mqttReporter.publishStatus(regionSelectTopic, regionSelectConfig);
-    console.log(`[MQTT] Published Region select discovery with ${regionCount} regions.`);
-
-    // Publish initial state if we know the current region
-    if (lastRegion !== null) {
-        const regionLabel = `Region ${lastRegion + 1}`;
-        mqttReporter.publishStatus(regionStateTopic, { region: regionLabel });
-    }
+    
+    mqttReporter.publishRegionSelect(regionCount, lastRegion);
 }

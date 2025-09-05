@@ -622,7 +622,7 @@ class Radio extends EventEmitter {
                     }
                     break;
                 case RadioBasicCommand.GET_VOLUME:
-                    this.volume = payload[0];
+                    this.volume = payload[1];
                     this.emit('infoUpdate', { type: 'Volume', value: this.volume });
                     break;
                 default:
