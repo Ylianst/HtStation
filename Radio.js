@@ -177,6 +177,52 @@ class Radio extends EventEmitter {
     getBatteryLevelAtPercentage() {
         this.requestPowerStatus('BATTERY_LEVEL_AS_PERCENTAGE');
     }
+
+    /**
+     * Write radio settings to change channels (cha, chb) and a few flags.
+     * Mirrors the C# RadioSettings.ToByteArray + WriteSettings behavior.
+     * @param {number} cha - channel A index
+     * @param {number} chb - channel B index
+     * @param {number} xdouble_channel - 0..3
+     * @param {boolean} xscan
+     * @param {number} xsquelch - 0..15
+     */
+    writeSettings(cha, chb, xdouble_channel = 0, xscan = false, xsquelch = 0) {
+        if (!this.settings || !this.settings.rawData || !Array.isArray(this.settings.rawData)) {
+            console.error('[Radio] Cannot write settings: settings not loaded');
+            return;
+        }
+        try {
+            // rawData is an Array of bytes; C# copies rawData[5..] into buf
+            const raw = this.settings.rawData;
+            if (raw.length <= 5) {
+                console.error('[Radio] Invalid settings raw data length');
+                return;
+            }
+            const buf = Buffer.from(raw.slice(5));
+
+            // buf[0] = (((cha & 0x0F) << 4) | (chb & 0x0F));
+            buf[0] = (((cha & 0x0F) << 4) | (chb & 0x0F)) & 0xFF;
+
+            // preserve aghfp_call_mode bit from current settings when present
+            const aghfp_flag = (this.settings.aghfp_call_mode ? 0x40 : 0);
+            const scan_flag = (xscan ? 0x80 : 0);
+            buf[1] = (scan_flag | aghfp_flag | ((xdouble_channel & 0x03) << 4) | (xsquelch & 0x0F)) & 0xFF;
+
+            // buf[9] = (byte)((cha & 0xF0) | ((chb & 0x0F) >> 4));
+            if (buf.length > 9) {
+                buf[9] = ((cha & 0xF0) | ((chb & 0xF0) >> 4)) & 0xFF;
+            }
+
+            // Send WRITE_SETTINGS (RadioBasicCommand.WRITE_SETTINGS)
+            this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.WRITE_SETTINGS, buf);
+            console.log(`[Radio] Sent WRITE_SETTINGS cha=${cha} chb=${chb} dbl=${xdouble_channel} scan=${xscan} squelch=${xsquelch}`);
+            // Optionally request READ_SETTINGS to refresh local cache
+            setTimeout(() => this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.READ_SETTINGS, null), 200);
+        } catch (e) {
+            console.error('[Radio] Error in writeSettings:', e.message);
+        }
+    }
     
     /**
      * Returns true if the radio is ready to transmit (not in TX or RX)

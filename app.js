@@ -66,6 +66,10 @@ let lastChannels = null;
 let lastSettingsInfo = null;
 let lastDevInfo = null;
 let lastBattery = null;
+let lastVolume = null;
+let lastSquelch = null;
+let lastScan = null;
+let lastDoubleChannel = null;
 // Ensure discovery/state for VFOs is only published once to avoid spamming MQTT/HA
 // Cache last published VFO options (JSON string) so we republish if names change
 let lastPublishedVfoOptions = null;
@@ -81,6 +85,34 @@ radio.on('infoUpdate', (info) => {
     if (info.type === 'Settings' && info.value) {
         lastSettingsInfo = info.value;
         publishChannelABSensors(info.value);
+        
+        // Publish squelch level state
+        if (typeof info.value.squelch_level === 'number') {
+            lastSquelch = info.value.squelch_level;
+            if (mqttReporter && config.MQTT_TOPIC) {
+                const squelchStateTopic = `${config.MQTT_TOPIC}/squelch`;
+                mqttReporter.publishStatus(squelchStateTopic, { squelch: info.value.squelch_level });
+            }
+        }
+        
+        // Publish scan state
+        if (typeof info.value.scan === 'boolean') {
+            lastScan = info.value.scan;
+            if (mqttReporter && config.MQTT_TOPIC) {
+                const scanStateTopic = `${config.MQTT_TOPIC}/scan`;
+                mqttReporter.publishStatus(scanStateTopic, { scan: info.value.scan ? 'ON' : 'OFF' });
+            }
+        }
+        
+        // Publish double_channel state
+        if (typeof info.value.double_channel === 'number') {
+            lastDoubleChannel = info.value.double_channel;
+            if (mqttReporter && config.MQTT_TOPIC) {
+                const doubleChannelStateTopic = `${config.MQTT_TOPIC}/double_channel`;
+                mqttReporter.publishStatus(doubleChannelStateTopic, { double_channel: info.value.double_channel === 1 ? 'ON' : 'OFF' });
+            }
+        }
+        
         // If channels are already loaded, publish VFO selects using channel_a and channel_b
         if (lastChannels && Array.isArray(lastChannels)) {
             const channelAIdx = (lastSettingsInfo && typeof lastSettingsInfo.channel_a === 'number') ? (lastSettingsInfo.channel_a) : 0;
@@ -95,6 +127,7 @@ radio.on('infoUpdate', (info) => {
     // When all channels loaded, publish VFO selects
     if (info.type === 'AllChannelsLoaded' && info.value && Array.isArray(info.value)) {
     const channels = info.value;
+    //console.log('[App] AllChannelsLoaded channels:', channels);
     lastChannels = channels;
         // DEBUG: show all channel name_str values and lengths to diagnose missing names
         try {
@@ -125,6 +158,15 @@ radio.on('infoUpdate', (info) => {
         if (mqttReporter && config.MQTT_TOPIC) {
             const batteryStateTopic = `${config.MQTT_TOPIC}/battery`;
             mqttReporter.publishStatus(batteryStateTopic, { battery: info.value });
+        }
+    }
+    
+    // Publish VolumeLevel locally and store lastVolume
+    if (info.type === 'Volume') {
+        lastVolume = info.value;
+        if (mqttReporter && config.MQTT_TOPIC) {
+            const volumeStateTopic = `${config.MQTT_TOPIC}/volume`;
+            mqttReporter.publishStatus(volumeStateTopic, { volume: info.value });
         }
     }
 
@@ -222,19 +264,124 @@ radio.connect(RADIO_MAC_ADDRESS)
             };
             mqttReporter.publishStatus(batterySensorTopic, batterySensorConfig);
             console.log('[MQTT] Published Home Assistant Battery sensor discovery config.');
+            
+            // Publish Home Assistant MQTT Discovery config for Volume number entity
+            const volumeNumberTopic = `homeassistant/number/uvpro_radio_volume/config`;
+            const volumeStateTopic = `${config.MQTT_TOPIC}/volume`;
+            const volumeCommandTopic = `${config.MQTT_TOPIC}/volume/set`;
+            const volumeNumberConfig = {
+                name: 'UVPro Radio Volume',
+                state_topic: volumeStateTopic,
+                command_topic: volumeCommandTopic,
+                unique_id: `${uniqueId}_volume`,
+                device: {
+                    identifiers: [uniqueId],
+                    name: 'UVPro Radio',
+                    manufacturer: 'BTech',
+                    model: 'UV-Pro'
+                },
+                min: 0,
+                max: 15,
+                step: 1,
+                value_template: '{{ value_json.volume }}',
+                icon: 'mdi:volume-high'
+            };
+            mqttReporter.publishStatus(volumeNumberTopic, volumeNumberConfig);
+            console.log('[MQTT] Published Home Assistant Volume number discovery config.');
+            
+            // Publish Home Assistant MQTT Discovery config for Squelch number entity
+            const squelchNumberTopic = `homeassistant/number/uvpro_radio_squelch/config`;
+            const squelchStateTopic = `${config.MQTT_TOPIC}/squelch`;
+            const squelchCommandTopic = `${config.MQTT_TOPIC}/squelch/set`;
+            const squelchNumberConfig = {
+                name: 'UVPro Radio Squelch',
+                state_topic: squelchStateTopic,
+                command_topic: squelchCommandTopic,
+                unique_id: `${uniqueId}_squelch`,
+                device: {
+                    identifiers: [uniqueId],
+                    name: 'UVPro Radio',
+                    manufacturer: 'BTech',
+                    model: 'UV-Pro'
+                },
+                min: 0,
+                max: 15,
+                step: 1,
+                value_template: '{{ value_json.squelch }}',
+                icon: 'mdi:volume-off'
+            };
+            mqttReporter.publishStatus(squelchNumberTopic, squelchNumberConfig);
+            console.log('[MQTT] Published Home Assistant Squelch number discovery config.');
+            
+            // Publish Home Assistant MQTT Discovery config for Scan switch entity
+            const scanSwitchTopic = `homeassistant/switch/uvpro_radio_scan/config`;
+            const scanStateTopic = `${config.MQTT_TOPIC}/scan`;
+            const scanCommandTopic = `${config.MQTT_TOPIC}/scan/set`;
+            const scanSwitchConfig = {
+                name: 'UVPro Radio Scan',
+                state_topic: scanStateTopic,
+                command_topic: scanCommandTopic,
+                unique_id: `${uniqueId}_scan`,
+                device: {
+                    identifiers: [uniqueId],
+                    name: 'UVPro Radio',
+                    manufacturer: 'BTech',
+                    model: 'UV-Pro'
+                },
+                payload_on: 'ON',
+                payload_off: 'OFF',
+                value_template: '{{ value_json.scan }}',
+                icon: 'mdi:radar'
+            };
+            mqttReporter.publishStatus(scanSwitchTopic, scanSwitchConfig);
+            console.log('[MQTT] Published Home Assistant Scan switch discovery config.');
+            
+            // Publish Home Assistant MQTT Discovery config for Double Channel switch entity
+            const doubleChannelSwitchTopic = `homeassistant/switch/uvpro_radio_double_channel/config`;
+            const doubleChannelStateTopic = `${config.MQTT_TOPIC}/double_channel`;
+            const doubleChannelCommandTopic = `${config.MQTT_TOPIC}/double_channel/set`;
+            const doubleChannelSwitchConfig = {
+                name: 'UVPro Radio Dual Watch',
+                state_topic: doubleChannelStateTopic,
+                command_topic: doubleChannelCommandTopic,
+                unique_id: `${uniqueId}_double_channel`,
+                device: {
+                    identifiers: [uniqueId],
+                    name: 'UVPro Radio',
+                    manufacturer: 'BTech',
+                    model: 'UV-Pro'
+                },
+                payload_on: 'ON',
+                payload_off: 'OFF',
+                value_template: '{{ value_json.double_channel }}',
+                icon: 'mdi:swap-horizontal'
+            };
+            mqttReporter.publishStatus(doubleChannelSwitchTopic, doubleChannelSwitchConfig);
+            console.log('[MQTT] Published Home Assistant Dual Watch switch discovery config.');
         }
 
-        // Poll battery percentage immediately and every minute while connected
+        // Poll battery percentage and volume immediately and every minute while connected
         let batteryPollInterval = null;
-        function pollBattery() {
-            if (radio && typeof radio.getBatteryLevelAtPercentage === 'function') {
-                radio.getBatteryLevelAtPercentage();
+        function pollStatus() {
+            if (radio) {
+                if (typeof radio.getBatteryLevelAtPercentage === 'function') {
+                    radio.getBatteryLevelAtPercentage();
+                }
+                if (typeof radio.getVolumeLevel === 'function') {
+                    try {
+                        radio.getVolumeLevel();
+                    } catch (e) {
+                        // avoid throwing from a poll call
+                        console.error('[App] Error calling getVolumeLevel():', e.message);
+                    }
+                }
             }
         }
-        pollBattery();
+        // Call once immediately after connect, then every minute while connected
+        pollStatus();
         batteryPollInterval = setInterval(() => {
             if (radio.state === 3) { // RadioState.CONNECTED
-                pollBattery();
+                pollStatus();
             }
         }, 60000);
         radio.on('disconnected', () => {
@@ -249,21 +396,23 @@ radio.connect(RADIO_MAC_ADDRESS)
     });
 
 // Patch MQTT connect to publish channel info after connection
+// Ensure VFO MQTT handlers are installed whether the client connected earlier or will connect later.
 if (mqttReporter) {
     const origConnect = mqttReporter.connect.bind(mqttReporter);
-    mqttReporter.connect = function () {
-        origConnect();
-        // Wait for MQTT connection event
-        this.client.on('connect', () => {
+
+    // Helper to attach the post-connect logic (runs immediately if already connected)
+    const installPostConnectHandlers = function () {
+        // If there's no client yet, nothing to do
+        if (!mqttReporter.client) return;
+
+        const setup = () => {
             // Publish last known channel info if available
             if (lastChannelInfo && lastChannelInfo.value) {
-                // Prefer htStatus.channel_id if available
                 const channel_id = (radio.htStatus && typeof radio.htStatus.channel_id === 'number')
                     ? radio.htStatus.channel_id
                     : lastChannelInfo.value.channel_id;
                 const info = Object.assign({}, lastChannelInfo);
                 info.value = Object.assign({}, info.value || {}, { channel_id });
-                // publishHtStatus expects an object with channel data (use info.value)
                 publishHtStatus(info.value);
             }
             // Publish last known battery state if available
@@ -271,31 +420,179 @@ if (mqttReporter) {
                 const batteryStateTopic = `${config.MQTT_TOPIC}/battery`;
                 mqttReporter.publishStatus(batteryStateTopic, { battery: lastBattery });
             }
+            
+            // Publish last known volume state if available
+            if (lastVolume !== null) {
+                const volumeStateTopic = `${config.MQTT_TOPIC}/volume`;
+                mqttReporter.publishStatus(volumeStateTopic, { volume: lastVolume });
+            }
+            
+            // Publish last known squelch state if available
+            if (lastSquelch !== null) {
+                const squelchStateTopic = `${config.MQTT_TOPIC}/squelch`;
+                mqttReporter.publishStatus(squelchStateTopic, { squelch: lastSquelch });
+            }
+            
+            // Publish last known scan state if available
+            if (lastScan !== null) {
+                const scanStateTopic = `${config.MQTT_TOPIC}/scan`;
+                mqttReporter.publishStatus(scanStateTopic, { scan: lastScan ? 'ON' : 'OFF' });
+            }
+            
+            // Publish last known double_channel state if available
+            if (lastDoubleChannel !== null) {
+                const doubleChannelStateTopic = `${config.MQTT_TOPIC}/double_channel`;
+                mqttReporter.publishStatus(doubleChannelStateTopic, { double_channel: lastDoubleChannel === 1 ? 'ON' : 'OFF' });
+            }
+
             // Subscribe to VFO select command topics so HA selections are reflected
             const vfo1CommandTopic = `${config.MQTT_TOPIC}/vfo1/set`;
             const vfo2CommandTopic = `${config.MQTT_TOPIC}/vfo2/set`;
-            this.client.subscribe([vfo1CommandTopic, vfo2CommandTopic], (err) => {
+            mqttReporter.client.subscribe([vfo1CommandTopic, vfo2CommandTopic], (err) => {
                 if (!err) console.log('[MQTT] Subscribed to VFO command topics');
             });
-            if (!this._vfoHandlerInstalled) {
-                this.client.on('message', (topic, message) => {
+            
+            // Subscribe to Volume command topic 
+            const volumeCommandTopic = `${config.MQTT_TOPIC}/volume/set`;
+            mqttReporter.client.subscribe(volumeCommandTopic, (err) => {
+                if (!err) console.log('[MQTT] Subscribed to Volume command topic');
+            });
+            
+            // Subscribe to Squelch command topic 
+            const squelchCommandTopic = `${config.MQTT_TOPIC}/squelch/set`;
+            mqttReporter.client.subscribe(squelchCommandTopic, (err) => {
+                if (!err) console.log('[MQTT] Subscribed to Squelch command topic');
+            });
+            
+            // Subscribe to Scan command topic 
+            const scanCommandTopic = `${config.MQTT_TOPIC}/scan/set`;
+            mqttReporter.client.subscribe(scanCommandTopic, (err) => {
+                if (!err) console.log('[MQTT] Subscribed to Scan command topic');
+            });
+            
+            // Subscribe to Double Channel command topic 
+            const doubleChannelCommandTopic = `${config.MQTT_TOPIC}/double_channel/set`;
+            mqttReporter.client.subscribe(doubleChannelCommandTopic, (err) => {
+                if (!err) console.log('[MQTT] Subscribed to Double Channel command topic');
+            });
+
+            if (!mqttReporter._vfoHandlerInstalled) {
+                mqttReporter.client.on('message', (topic, message) => {
                     try {
                         const msg = message.toString();
                         if (topic === vfo1CommandTopic) {
                             mqttReporter.publishStatus(`${config.MQTT_TOPIC}/vfo1`, { vfo: msg });
                             console.log(`[MQTT] VFO1 set to: ${msg}`);
+                            const m = msg.match(/^\s*(\d+)\s*:/);
+                            if (m) {
+                                const idx = parseInt(m[1], 10) - 1;
+                                const cha = (lastSettingsInfo && typeof lastSettingsInfo.channel_a === 'number') ? lastSettingsInfo.channel_a : 0;
+                                const chb = (lastSettingsInfo && typeof lastSettingsInfo.channel_b === 'number') ? lastSettingsInfo.channel_b : 0;
+                                if (radio && typeof radio.writeSettings === 'function') {
+                                    radio.writeSettings(idx, chb, (lastSettingsInfo && lastSettingsInfo.double_channel) ? lastSettingsInfo.double_channel : 0, (lastSettingsInfo && lastSettingsInfo.scan) ? lastSettingsInfo.scan : false, (lastSettingsInfo && lastSettingsInfo.squelch_level) ? lastSettingsInfo.squelch_level : 0);
+                                }
+                            }
                         } else if (topic === vfo2CommandTopic) {
                             mqttReporter.publishStatus(`${config.MQTT_TOPIC}/vfo2`, { vfo: msg });
                             console.log(`[MQTT] VFO2 set to: ${msg}`);
+                            const m = msg.match(/^\s*(\d+)\s*:/);
+                            if (m) {
+                                const idx = parseInt(m[1], 10) - 1;
+                                const cha = (lastSettingsInfo && typeof lastSettingsInfo.channel_a === 'number') ? lastSettingsInfo.channel_a : 0;
+                                const chb = (lastSettingsInfo && typeof lastSettingsInfo.channel_b === 'number') ? lastSettingsInfo.channel_b : 0;
+                                if (radio && typeof radio.writeSettings === 'function') {
+                                    radio.writeSettings(cha, idx, (lastSettingsInfo && lastSettingsInfo.double_channel) ? lastSettingsInfo.double_channel : 0, (lastSettingsInfo && lastSettingsInfo.scan) ? lastSettingsInfo.scan : false, (lastSettingsInfo && lastSettingsInfo.squelch_level) ? lastSettingsInfo.squelch_level : 0);
+                                }
+                            }
+                        } else if (topic === volumeCommandTopic) {
+                            const volumeLevel = parseInt(msg, 10);
+                            if (!isNaN(volumeLevel) && volumeLevel >= 0 && volumeLevel <= 15) {
+                                console.log(`[MQTT] Volume set to: ${volumeLevel}`);
+                                if (radio && typeof radio.setVolumeLevel === 'function') {
+                                    radio.setVolumeLevel(volumeLevel);
+                                }
+                                // Optimistically publish the new volume state 
+                                mqttReporter.publishStatus(`${config.MQTT_TOPIC}/volume`, { volume: volumeLevel });
+                            } else {
+                                console.warn(`[MQTT] Invalid volume level: ${msg} (expected 0-15)`);
+                            }
+                        } else if (topic === squelchCommandTopic) {
+                            const squelchLevel = parseInt(msg, 10);
+                            if (!isNaN(squelchLevel) && squelchLevel >= 0 && squelchLevel <= 15) {
+                                console.log(`[MQTT] Squelch set to: ${squelchLevel}`);
+                                if (radio && typeof radio.writeSettings === 'function' && lastSettingsInfo) {
+                                    // Use current settings but update squelch level
+                                    const cha = (lastSettingsInfo && typeof lastSettingsInfo.channel_a === 'number') ? lastSettingsInfo.channel_a : 0;
+                                    const chb = (lastSettingsInfo && typeof lastSettingsInfo.channel_b === 'number') ? lastSettingsInfo.channel_b : 0;
+                                    const xdouble_channel = (lastSettingsInfo && lastSettingsInfo.double_channel) ? lastSettingsInfo.double_channel : 0;
+                                    const xscan = (lastSettingsInfo && lastSettingsInfo.scan) ? lastSettingsInfo.scan : false;
+                                    radio.writeSettings(cha, chb, xdouble_channel, xscan, squelchLevel);
+                                }
+                                // Optimistically publish the new squelch state 
+                                mqttReporter.publishStatus(`${config.MQTT_TOPIC}/squelch`, { squelch: squelchLevel });
+                            } else {
+                                console.warn(`[MQTT] Invalid squelch level: ${msg} (expected 0-15)`);
+                            }
+                        } else if (topic === scanCommandTopic) {
+                            const scanState = msg.toUpperCase();
+                            if (scanState === 'ON' || scanState === 'OFF') {
+                                const scanValue = scanState === 'ON';
+                                console.log(`[MQTT] Scan set to: ${scanValue ? 'ON' : 'OFF'}`);
+                                if (radio && typeof radio.writeSettings === 'function' && lastSettingsInfo) {
+                                    // Use current settings but update scan value
+                                    const cha = (lastSettingsInfo && typeof lastSettingsInfo.channel_a === 'number') ? lastSettingsInfo.channel_a : 0;
+                                    const chb = (lastSettingsInfo && typeof lastSettingsInfo.channel_b === 'number') ? lastSettingsInfo.channel_b : 0;
+                                    const xdouble_channel = (lastSettingsInfo && lastSettingsInfo.double_channel) ? lastSettingsInfo.double_channel : 0;
+                                    const xsquelch = (lastSettingsInfo && typeof lastSettingsInfo.squelch_level === 'number') ? lastSettingsInfo.squelch_level : 0;
+                                    radio.writeSettings(cha, chb, xdouble_channel, scanValue, xsquelch);
+                                }
+                                // Optimistically publish the new scan state 
+                                mqttReporter.publishStatus(`${config.MQTT_TOPIC}/scan`, { scan: scanState });
+                            } else {
+                                console.warn(`[MQTT] Invalid scan state: ${msg} (expected ON or OFF)`);
+                            }
+                        } else if (topic === doubleChannelCommandTopic) {
+                            const doubleChannelState = msg.toUpperCase();
+                            if (doubleChannelState === 'ON' || doubleChannelState === 'OFF') {
+                                const doubleChannelValue = doubleChannelState === 'ON' ? 1 : 0;
+                                console.log(`[MQTT] Dual Watch set to: ${doubleChannelState} (${doubleChannelValue})`);
+                                if (radio && typeof radio.writeSettings === 'function' && lastSettingsInfo) {
+                                    // Use current settings but update double_channel value
+                                    const cha = (lastSettingsInfo && typeof lastSettingsInfo.channel_a === 'number') ? lastSettingsInfo.channel_a : 0;
+                                    const chb = (lastSettingsInfo && typeof lastSettingsInfo.channel_b === 'number') ? lastSettingsInfo.channel_b : 0;
+                                    const xscan = (lastSettingsInfo && typeof lastSettingsInfo.scan === 'boolean') ? lastSettingsInfo.scan : false;
+                                    const xsquelch = (lastSettingsInfo && typeof lastSettingsInfo.squelch_level === 'number') ? lastSettingsInfo.squelch_level : 0;
+                                    radio.writeSettings(cha, chb, doubleChannelValue, xscan, xsquelch);
+                                }
+                                // Optimistically publish the new double_channel state 
+                                mqttReporter.publishStatus(`${config.MQTT_TOPIC}/double_channel`, { double_channel: doubleChannelState });
+                            } else {
+                                console.warn(`[MQTT] Invalid dual watch state: ${msg} (expected ON or OFF)`);
+                            }
                         }
                     } catch (e) {
-                        console.error('[MQTT] Error handling VFO message:', e.message);
+                        console.error('[MQTT] Error handling message:', e.message);
                     }
                 });
-                this._vfoHandlerInstalled = true;
+                mqttReporter._vfoHandlerInstalled = true;
             }
-        });
-    }
+        };
+
+        // If client is already connected, run setup now, otherwise run once on next connect
+        if (mqttReporter.client.connected) setup();
+        else mqttReporter.client.once('connect', setup);
+    };
+
+    // Preserve original connect behavior but ensure post-connect handlers are installed after connect
+    mqttReporter.connect = function () {
+        origConnect();
+        // origConnect may have created the client and even connected already; ensure our handlers are installed
+        installPostConnectHandlers();
+    };
+
+    // Also attempt to install handlers immediately in case the original connect was called earlier
+    installPostConnectHandlers();
+
 }
 
 // Helper to publish channel sensor discovery and state
