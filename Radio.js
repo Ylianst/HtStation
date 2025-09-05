@@ -301,6 +301,13 @@ class Radio extends EventEmitter {
         this.loadChannels = options.loadChannels !== undefined ? options.loadChannels : true;
         this._tncFrameAccumulator = null;
         this._tncExpectedFragmentId = 0;
+        
+        // GPS state management
+        this.gpsEnabled = false;
+        this.gpsLock = 2; // 0 == GPS is locked, other values indicate the GPS is not locked
+        this.position = null;
+        this.lastGpsUpdate = null; // Track when we last received a GPS position
+        this.gpsLockTimer = null; // Timer to check GPS lock timeout
     }
     /**
      * Updates the internal state of the radio.
@@ -396,6 +403,12 @@ class Radio extends EventEmitter {
 
     onDisconnected() {
         this.updateState(RadioState.DISCONNECTED);
+        
+        // Clean up GPS lock timer
+        if (this.gpsLockTimer) {
+            clearInterval(this.gpsLockTimer);
+            this.gpsLockTimer = null;
+        }
     }
 
     onDebugMessage(msg) {
@@ -502,7 +515,7 @@ class Radio extends EventEmitter {
                 }
                 case RadioBasicCommand.EVENT_NOTIFICATION:
                     const notificationType = payload[0];
-                    console.log(`[Radio] Received notification: ${Object.keys(RadioNotification).find(key => RadioNotification[key] === notificationType)}`);
+                    //console.log(`[Radio] Received notification: ${Object.keys(RadioNotification).find(key => RadioNotification[key] === notificationType)}`);
                     switch (notificationType) {
                         case RadioNotification.HT_STATUS_CHANGED:
                             // Decode HT status using the C# logic
@@ -591,6 +604,19 @@ class Radio extends EventEmitter {
                                 this.emit('data', packet);
                             }
                             break;
+                        case RadioNotification.POSITION_CHANGE:
+                            // Set status to success and decode position
+                            value[4] = 0; // Set status to success
+                            this.position = this.decodeRadioPosition(value);
+                            this.lastGpsUpdate = new Date(); // Record when we received this update
+                            
+                            if (this.gpsLock > 0) { 
+                                this.gpsLock--; // Decrease the GPS lock counter
+                            }
+                            this.position.locked = (this.gpsLock === 0);
+                            console.log(`[Radio] GPS Position update - Locked: ${this.position.locked}, Lat: ${this.position.latitude}, Lng: ${this.position.longitude}`);
+                            this.emit('positionUpdate', this.position);
+                            break;
                         default:
                             console.warn(`[Radio] Unhandled notification type: ${notificationType}`);
                     }
@@ -649,6 +675,208 @@ class Radio extends EventEmitter {
             return;
         }
         this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.SET_VOLUME, level);
+    }
+
+    setRegion(region) {
+        if (typeof region !== 'number' || !Number.isInteger(region)) {
+            console.error('[Radio] Region must be an integer.');
+            return;
+        }
+        
+        // Validate region against region_count from DevInfo (typically 0-5 for region_count=6)
+        const maxRegion = (this.info && typeof this.info.region_count === 'number') ? this.info.region_count - 1 : 5;
+        if (region < 0 || region > maxRegion) {
+            console.error(`[Radio] Region must be between 0 and ${maxRegion} (region_count: ${this.info ? this.info.region_count : 'unknown'}).`);
+            return;
+        }
+        
+        this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.SET_REGION, region);
+        console.log(`[Radio] Set region to: ${region}`);
+        
+        // After changing region, reload all channels since they may be different
+        if (this.loadChannels && this.info && typeof this.info.channel_count === 'number') {
+            console.log('[Radio] Reloading channels after region change...');
+            this.channels = new Array(this.info.channel_count);
+            for (let i = 0; i < this.info.channel_count; ++i) {
+                this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.READ_RF_CH, i);
+            }
+        }
+    }
+
+    /**
+     * Enables or disables GPS position notifications
+     * @param {boolean} enabled - True to enable GPS, false to disable
+     */
+    setGpsEnabled(enabled) {
+        if (this.gpsEnabled === enabled) return;
+        
+        this.gpsEnabled = enabled;
+        
+        if (this.state === RadioState.CONNECTED) {
+            this.gpsLock = 2; // Reset GPS lock status
+            this.lastGpsUpdate = null; // Reset last update time
+            
+            // Clear any existing timer
+            if (this.gpsLockTimer) {
+                clearInterval(this.gpsLockTimer);
+                this.gpsLockTimer = null;
+            }
+            
+            if (this.gpsEnabled) {
+                console.log('[Radio] Enabling GPS position notifications');
+                this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.REGISTER_NOTIFICATION, RadioNotification.POSITION_CHANGE);
+                
+                // Start GPS lock timeout checker (runs every 5 seconds)
+                this.gpsLockTimer = setInterval(() => {
+                    this.checkGpsLockTimeout();
+                }, 5000);
+            } else {
+                console.log('[Radio] Disabling GPS position notifications');
+                this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.CANCEL_NOTIFICATION, RadioNotification.POSITION_CHANGE);
+            }
+        }
+    }
+
+    /**
+     * Checks if GPS lock has timed out (no position updates in 30 seconds)
+     */
+    checkGpsLockTimeout() {
+        if (!this.gpsEnabled || !this.lastGpsUpdate) return;
+        
+        const timeSinceLastUpdate = Date.now() - this.lastGpsUpdate.getTime();
+        const thirtySecondsMs = 30 * 1000;
+        
+        if (timeSinceLastUpdate > thirtySecondsMs) {
+            // GPS lock has timed out
+            if (this.gpsLock === 0) {
+                console.log('[Radio] GPS lock timeout - setting lock to false');
+                this.gpsLock = 1; // Set to unlocked
+                
+                // Update position lock status and emit update
+                if (this.position) {
+                    this.position.locked = false;
+                    this.emit('positionUpdate', this.position);
+                }
+            }
+        }
+    }
+
+    /**
+     * Returns current GPS status
+     * @returns {object} GPS status information
+     */
+    getGpsStatus() {
+        return {
+            enabled: this.gpsEnabled,
+            locked: this.gpsLock === 0,
+            position: this.position
+        };
+    }
+
+    /**
+     * Decodes radio position data from GPS notification
+     * @param {Uint8Array} msg - The GPS position message
+     * @returns {object} Decoded position information
+     */
+    decodeRadioPosition(msg) {
+        const status = msg[4];
+        const position = {
+            status,
+            latitudeRaw: 0,
+            longitudeRaw: 0,
+            altitude: 0,
+            speed: 0,
+            heading: 0,
+            timeRaw: 0,
+            accuracy: 0,
+            latitudeStr: '',
+            longitudeStr: '',
+            latitude: 0,
+            longitude: 0,
+            timeUTC: null,
+            time: null,
+            receivedTime: new Date(),
+            locked: false
+        };
+
+        if (status === RadioCommandErrors.SUCCESS) {
+            // Extract raw latitude and longitude (24-bit values)
+            position.latitudeRaw = (msg[5] << 16) + (msg[6] << 8) + msg[7];
+            position.longitudeRaw = (msg[8] << 16) + (msg[9] << 8) + msg[10];
+            
+            // Convert to decimal degrees and DMS strings
+            position.latitude = this.convertLatitude(position.latitudeRaw);
+            position.longitude = this.convertLatitude(position.longitudeRaw);
+            position.latitudeStr = this.convertLatitudeToDms(position.latitudeRaw, true);
+            position.longitudeStr = this.convertLatitudeToDms(position.longitudeRaw, false);
+            
+            // Extract additional fields if message is long enough
+            if (msg.length > 11) {
+                position.altitude = (msg[11] << 8) + msg[12];
+                position.speed = (msg[13] << 8) + msg[14];
+                position.heading = (msg[15] << 8) + msg[16];
+                position.timeRaw = (msg[17] << 24) + (msg[18] << 16) + (msg[19] << 8) + msg[20];
+                position.timeUTC = new Date(position.timeRaw * 1000);
+                position.time = new Date(position.timeRaw * 1000);
+                position.accuracy = (msg[21] << 8) + msg[22];
+            }
+        }
+
+        return position;
+    }
+
+    /**
+     * Converts raw latitude/longitude to decimal degrees
+     * @param {number} rawValue - 24-bit raw coordinate value
+     * @returns {number} Decimal degrees
+     */
+    convertLatitude(rawValue) {
+        // Handle 24-bit two's complement
+        if ((rawValue & 0x800000) !== 0) {
+            // Sign-extend from 24 bits to 32 bits
+            rawValue |= 0xFF000000;
+        } else {
+            // Ensure no higher bits are set if positive
+            rawValue &= 0x00FFFFFF;
+        }
+
+        return rawValue / 60.0 / 500.0;
+    }
+
+    /**
+     * Converts raw coordinate to DMS (Degrees, Minutes, Seconds) string
+     * @param {number} rawValue - 24-bit raw coordinate value
+     * @param {boolean} isLatitude - True for latitude (N/S), false for longitude (E/W)
+     * @returns {string} DMS formatted string
+     */
+    convertLatitudeToDms(rawValue, isLatitude = true) {
+        // Handle 24-bit two's complement
+        if ((rawValue & 0x800000) !== 0) {
+            // Sign-extend from 24 bits to 32 bits
+            rawValue |= 0xFF000000;
+        } else {
+            // Ensure no higher bits are set if positive
+            rawValue &= 0x00FFFFFF;
+        }
+
+        let degreesDecimal = rawValue / 60.0 / 500.0;
+
+        // Determine the cardinal direction
+        let direction;
+        if (isLatitude) {
+            direction = degreesDecimal >= 0 ? 'N' : 'S';
+        } else {
+            direction = degreesDecimal >= 0 ? 'E' : 'W';
+        }
+        
+        degreesDecimal = Math.abs(degreesDecimal); // Work with positive value
+
+        const degrees = Math.floor(degreesDecimal);
+        const minutesDecimal = (degreesDecimal - degrees) * 60;
+        const minutes = Math.floor(minutesDecimal);
+        const seconds = (minutesDecimal - minutes) * 60;
+
+        return `${degrees}° ${minutes}' ${seconds.toFixed(2)}" ${direction}`;
     }
 }
 

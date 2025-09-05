@@ -70,6 +70,9 @@ let lastVolume = null;
 let lastSquelch = null;
 let lastScan = null;
 let lastDoubleChannel = null;
+let lastRegion = null;
+let lastGpsEnabled = null;
+let lastGpsPosition = null;
 // Ensure discovery/state for VFOs is only published once to avoid spamming MQTT/HA
 // Cache last published VFO options (JSON string) so we republish if names change
 let lastPublishedVfoOptions = null;
@@ -80,12 +83,16 @@ radio.on('infoUpdate', (info) => {
     if (info.type === 'Info' && info.value) {
         lastDevInfo = info.value;
         publishFirmwareVersionSensor(info.value);
+
+        // Publish Region select discovery when DevInfo is available
+        if (typeof info.value.region_count === 'number') {
+            publishRegionSelect(info.value.region_count);
+        }
     }
     // Store last settings info for later MQTT update
     if (info.type === 'Settings' && info.value) {
         lastSettingsInfo = info.value;
-        publishChannelABSensors(info.value);
-        
+
         // Publish squelch level state
         if (typeof info.value.squelch_level === 'number') {
             lastSquelch = info.value.squelch_level;
@@ -94,7 +101,7 @@ radio.on('infoUpdate', (info) => {
                 mqttReporter.publishStatus(squelchStateTopic, { squelch: info.value.squelch_level });
             }
         }
-        
+
         // Publish scan state
         if (typeof info.value.scan === 'boolean') {
             lastScan = info.value.scan;
@@ -103,7 +110,7 @@ radio.on('infoUpdate', (info) => {
                 mqttReporter.publishStatus(scanStateTopic, { scan: info.value.scan ? 'ON' : 'OFF' });
             }
         }
-        
+
         // Publish double_channel state
         if (typeof info.value.double_channel === 'number') {
             lastDoubleChannel = info.value.double_channel;
@@ -112,7 +119,7 @@ radio.on('infoUpdate', (info) => {
                 mqttReporter.publishStatus(doubleChannelStateTopic, { double_channel: info.value.double_channel === 1 ? 'ON' : 'OFF' });
             }
         }
-        
+
         // If channels are already loaded, publish VFO selects using channel_a and channel_b
         if (lastChannels && Array.isArray(lastChannels)) {
             const channelAIdx = (lastSettingsInfo && typeof lastSettingsInfo.channel_a === 'number') ? (lastSettingsInfo.channel_a) : 0;
@@ -122,13 +129,22 @@ radio.on('infoUpdate', (info) => {
     }
     // Store last channel info for later MQTT update
     if (info.type === 'HtStatus' && radio.htStatus) {
-        publishHtStatus(radio.htStatus);
+
+        // Publish region state when HtStatus is updated
+        if (typeof radio.htStatus.curr_region === 'number') {
+            lastRegion = radio.htStatus.curr_region;
+            if (mqttReporter && config.MQTT_TOPIC) {
+                const regionStateTopic = `${config.MQTT_TOPIC}/region_select`;
+                const regionLabel = `Region ${radio.htStatus.curr_region + 1}`;
+                mqttReporter.publishStatus(regionStateTopic, { region: regionLabel });
+            }
+        }
     }
     // When all channels loaded, publish VFO selects
     if (info.type === 'AllChannelsLoaded' && info.value && Array.isArray(info.value)) {
-    const channels = info.value;
-    //console.log('[App] AllChannelsLoaded channels:', channels);
-    lastChannels = channels;
+        const channels = info.value;
+        //console.log('[App] AllChannelsLoaded channels:', channels);
+        lastChannels = channels;
         // DEBUG: show all channel name_str values and lengths to diagnose missing names
         try {
             const names = channels.map((ch, idx) => ({ idx: idx + 1, name: (ch && ch.name_str) || '', len: (ch && ch.name_str) ? ch.name_str.length : 0 }));
@@ -143,12 +159,13 @@ radio.on('infoUpdate', (info) => {
         } catch (e) {
             console.error('[App] Error logging channel names:', e.message);
         }
-    const channelAIdx = (lastSettingsInfo && typeof lastSettingsInfo.channel_a === 'number') ? (lastSettingsInfo.channel_a) : 0;
-    const channelBIdx = (lastSettingsInfo && typeof lastSettingsInfo.channel_b === 'number') ? (lastSettingsInfo.channel_b) : 0;
+        const channelAIdx = (lastSettingsInfo && typeof lastSettingsInfo.channel_a === 'number') ? (lastSettingsInfo.channel_a) : 0;
+        const channelBIdx = (lastSettingsInfo && typeof lastSettingsInfo.channel_b === 'number') ? (lastSettingsInfo.channel_b) : 0;
         // Per user request, VFO selection shows index starting at 1; publishVfoSelects expects zero-based indexes
-    // Force republish to ensure Home Assistant receives the latest channel names
-    lastPublishedVfoOptions = null;
-    publishVfoSelects(channels, channelAIdx, channelBIdx);
+        // Force republish to ensure Home Assistant receives the latest channel names (especially after region changes)
+        lastPublishedVfoOptions = null;
+        publishVfoSelects(channels, channelAIdx, channelBIdx);
+        //console.log('[App] Updated VFO selects with reloaded channels.');
     }
     // When MQTT connects, publish last channel info if available
     // (Handled by the mqttReporter.connect override below when the MQTT reporter is created.)
@@ -160,7 +177,7 @@ radio.on('infoUpdate', (info) => {
             mqttReporter.publishStatus(batteryStateTopic, { battery: info.value });
         }
     }
-    
+
     // Publish VolumeLevel locally and store lastVolume
     if (info.type === 'Volume') {
         lastVolume = info.value;
@@ -176,7 +193,7 @@ radio.on('infoUpdate', (info) => {
         let payload = { type: info.type, value: info.value };
         mqttReporter.publishStatus(topic, payload);
     }
-    
+
     /*
     if (info.type === 'ChannelInfo') {
         console.log(`[App] Channel ${info.value.channel_id} loaded.`);
@@ -237,11 +254,36 @@ radio.on('disconnected', () => {
     console.log('[App] Disconnected from radio.');
 });
 
-// Attempt to connect to the radio
+radio.on('positionUpdate', (position) => {
+    console.log(`[App] GPS Position: ${position.latitudeStr}, ${position.longitudeStr}, Alt: ${position.altitude}m, Lock: ${position.locked}`);
+    
+    // Publish GPS position data to MQTT
+    if (mqttReporter && config.MQTT_TOPIC) {
+        const gpsPositionTopic = `${config.MQTT_TOPIC}/gps_position`;
+        const positionData = {
+            latitude: Math.round(position.latitude * 100000) / 100000,
+            longitude: Math.round(position.longitude * 100000) / 100000,
+            altitude: position.altitude,
+            speed: position.speed,
+            heading: position.heading,
+            accuracy: position.accuracy,
+            locked: position.locked,
+            lock_status: position.locked ? 'Locked' : 'No Lock',
+            latitude_dms: position.latitudeStr,
+            longitude_dms: position.longitudeStr,
+            timestamp: position.receivedTime.toISOString()
+        };
+        mqttReporter.publishStatus(gpsPositionTopic, positionData);
+        //console.log(`[MQTT] DEBUG: Published GPS position data to ${gpsPositionTopic}`);
+        //console.log(`[MQTT] DEBUG: Position data:`, JSON.stringify(positionData, null, 2));
+    } else {
+        console.log('[MQTT] Cannot publish GPS position - mqttReporter or config.MQTT_TOPIC not available');
+    }
+});// Attempt to connect to the radio
 radio.connect(RADIO_MAC_ADDRESS)
     .then(() => {
         console.log('Successfully connected to radio!');
-    // (removed generic UVPro Radio discovery sensor - individual sensors are published separately)
+        // (removed generic UVPro Radio discovery sensor - individual sensors are published separately)
 
         // Publish Home Assistant MQTT Discovery config for Battery sensor at startup
         if (mqttReporter && config.MQTT_TOPIC) {
@@ -264,7 +306,7 @@ radio.connect(RADIO_MAC_ADDRESS)
             };
             mqttReporter.publishStatus(batterySensorTopic, batterySensorConfig);
             console.log('[MQTT] Published Home Assistant Battery sensor discovery config.');
-            
+
             // Publish Home Assistant MQTT Discovery config for Volume number entity
             const volumeNumberTopic = `homeassistant/number/uvpro_radio_volume/config`;
             const volumeStateTopic = `${config.MQTT_TOPIC}/volume`;
@@ -288,7 +330,7 @@ radio.connect(RADIO_MAC_ADDRESS)
             };
             mqttReporter.publishStatus(volumeNumberTopic, volumeNumberConfig);
             console.log('[MQTT] Published Home Assistant Volume number discovery config.');
-            
+
             // Publish Home Assistant MQTT Discovery config for Squelch number entity
             const squelchNumberTopic = `homeassistant/number/uvpro_radio_squelch/config`;
             const squelchStateTopic = `${config.MQTT_TOPIC}/squelch`;
@@ -312,7 +354,7 @@ radio.connect(RADIO_MAC_ADDRESS)
             };
             mqttReporter.publishStatus(squelchNumberTopic, squelchNumberConfig);
             console.log('[MQTT] Published Home Assistant Squelch number discovery config.');
-            
+
             // Publish Home Assistant MQTT Discovery config for Scan switch entity
             const scanSwitchTopic = `homeassistant/switch/uvpro_radio_scan/config`;
             const scanStateTopic = `${config.MQTT_TOPIC}/scan`;
@@ -335,7 +377,7 @@ radio.connect(RADIO_MAC_ADDRESS)
             };
             mqttReporter.publishStatus(scanSwitchTopic, scanSwitchConfig);
             console.log('[MQTT] Published Home Assistant Scan switch discovery config.');
-            
+
             // Publish Home Assistant MQTT Discovery config for Double Channel switch entity
             const doubleChannelSwitchTopic = `homeassistant/switch/uvpro_radio_double_channel/config`;
             const doubleChannelStateTopic = `${config.MQTT_TOPIC}/double_channel`;
@@ -358,6 +400,117 @@ radio.connect(RADIO_MAC_ADDRESS)
             };
             mqttReporter.publishStatus(doubleChannelSwitchTopic, doubleChannelSwitchConfig);
             console.log('[MQTT] Published Home Assistant Dual Watch switch discovery config.');
+        }
+
+        // Publish GPS enable/disable switch
+        if (mqttReporter && config.MQTT_TOPIC) {
+            const uniqueId = `uvpro_radio_${RADIO_STATIONID}`;
+            const gpsSwitchTopic = `homeassistant/switch/uvpro_radio_gps/config`;
+            const gpsCommandTopic = `${config.MQTT_TOPIC}/gps/set`;
+            const gpsStateTopic = `${config.MQTT_TOPIC}/gps`;
+            const gpsSwitchConfig = {
+                name: 'UVPro Radio GPS',
+                state_topic: gpsStateTopic,
+                command_topic: gpsCommandTopic,
+                unique_id: `${uniqueId}_gps`,
+                device: {
+                    identifiers: [uniqueId],
+                    name: 'UVPro Radio',
+                    manufacturer: 'BTech',
+                    model: 'UV-Pro'
+                },
+                payload_on: 'ON',
+                payload_off: 'OFF',
+                value_template: '{{ value_json.gps }}',
+                icon: 'mdi:crosshairs-gps'
+            };
+            mqttReporter.publishStatus(gpsSwitchTopic, gpsSwitchConfig);
+            console.log('[MQTT] Published Home Assistant GPS switch discovery config.');
+
+            // Publish initial GPS state as OFF since GPS starts disabled
+            mqttReporter.publishStatus(gpsStateTopic, { gps: 'OFF' });
+        }
+
+        // Publish GPS position sensors (simplified without availability topics)
+        if (mqttReporter && config.MQTT_TOPIC) {
+            const uniqueId = `uvpro_radio_${RADIO_STATIONID}`;
+            const gpsStateTopic = `${config.MQTT_TOPIC}/gps_position`;
+
+            // GPS Latitude sensor
+            const latSensorTopic = `homeassistant/sensor/uvpro_radio_gps_lat/config`;
+            const latSensorConfig = {
+                name: 'UVPro Radio GPS Latitude',
+                state_topic: gpsStateTopic,
+                unique_id: `${uniqueId}_gps_lat`,
+                device: {
+                    identifiers: [uniqueId],
+                    name: 'UVPro Radio',
+                    manufacturer: 'BTech',
+                    model: 'UV-Pro'
+                },
+                value_template: '{{ value_json.latitude }}',
+                unit_of_measurement: '°',
+                icon: 'mdi:latitude'
+            };
+            mqttReporter.publishStatus(latSensorTopic, latSensorConfig);
+
+            // GPS Longitude sensor
+            const lngSensorTopic = `homeassistant/sensor/uvpro_radio_gps_lng/config`;
+            const lngSensorConfig = {
+                name: 'UVPro Radio GPS Longitude',
+                state_topic: gpsStateTopic,
+                unique_id: `${uniqueId}_gps_lng`,
+                device: {
+                    identifiers: [uniqueId],
+                    name: 'UVPro Radio',
+                    manufacturer: 'BTech',
+                    model: 'UV-Pro'
+                },
+                value_template: '{{ value_json.longitude }}',
+                unit_of_measurement: '°',
+                icon: 'mdi:longitude'
+            };
+            mqttReporter.publishStatus(lngSensorTopic, lngSensorConfig);
+
+            // GPS Altitude sensor
+            const altSensorTopic = `homeassistant/sensor/uvpro_radio_gps_alt/config`;
+            const altSensorConfig = {
+                name: 'UVPro Radio GPS Altitude',
+                state_topic: gpsStateTopic,
+                unique_id: `${uniqueId}_gps_alt`,
+                device: {
+                    identifiers: [uniqueId],
+                    name: 'UVPro Radio',
+                    manufacturer: 'BTech',
+                    model: 'UV-Pro'
+                },
+                value_template: '{{ value_json.altitude }}',
+                unit_of_measurement: 'm',
+                icon: 'mdi:altimeter'
+            };
+            mqttReporter.publishStatus(altSensorTopic, altSensorConfig);
+
+            // GPS Lock status sensor (using regular sensor for text display)
+            const lockSensorTopic = `homeassistant/sensor/uvpro_radio_gps_lock/config`;
+            const lockSensorConfig = {
+                name: 'UVPro Radio GPS Lock',
+                state_topic: gpsStateTopic,
+                unique_id: `${uniqueId}_gps_lock`,
+                device: {
+                    identifiers: [uniqueId],
+                    name: 'UVPro Radio',
+                    manufacturer: 'BTech',
+                    model: 'UV-Pro'
+                },
+                value_template: '{{ value_json.lock_status }}',
+                icon: 'mdi:satellite-variant'
+            };
+            mqttReporter.publishStatus(lockSensorTopic, lockSensorConfig);
+
+            console.log('[MQTT] Published Home Assistant GPS sensors discovery config.');
+
+            // Publish initial "GPS disabled" position data 
+            publishGpsDisabledState();
         }
 
         // Poll battery percentage and volume immediately and every minute while connected
@@ -406,43 +559,41 @@ if (mqttReporter) {
         if (!mqttReporter.client) return;
 
         const setup = () => {
-            // Publish last known channel info if available
-            if (lastChannelInfo && lastChannelInfo.value) {
-                const channel_id = (radio.htStatus && typeof radio.htStatus.channel_id === 'number')
-                    ? radio.htStatus.channel_id
-                    : lastChannelInfo.value.channel_id;
-                const info = Object.assign({}, lastChannelInfo);
-                info.value = Object.assign({}, info.value || {}, { channel_id });
-                publishHtStatus(info.value);
-            }
             // Publish last known battery state if available
             if (lastBattery !== null) {
                 const batteryStateTopic = `${config.MQTT_TOPIC}/battery`;
                 mqttReporter.publishStatus(batteryStateTopic, { battery: lastBattery });
             }
-            
+
             // Publish last known volume state if available
             if (lastVolume !== null) {
                 const volumeStateTopic = `${config.MQTT_TOPIC}/volume`;
                 mqttReporter.publishStatus(volumeStateTopic, { volume: lastVolume });
             }
-            
+
             // Publish last known squelch state if available
             if (lastSquelch !== null) {
                 const squelchStateTopic = `${config.MQTT_TOPIC}/squelch`;
                 mqttReporter.publishStatus(squelchStateTopic, { squelch: lastSquelch });
             }
-            
+
             // Publish last known scan state if available
             if (lastScan !== null) {
                 const scanStateTopic = `${config.MQTT_TOPIC}/scan`;
                 mqttReporter.publishStatus(scanStateTopic, { scan: lastScan ? 'ON' : 'OFF' });
             }
-            
+
             // Publish last known double_channel state if available
             if (lastDoubleChannel !== null) {
                 const doubleChannelStateTopic = `${config.MQTT_TOPIC}/double_channel`;
                 mqttReporter.publishStatus(doubleChannelStateTopic, { double_channel: lastDoubleChannel === 1 ? 'ON' : 'OFF' });
+            }
+
+            // Publish last known region state if available
+            if (lastRegion !== null) {
+                const regionStateTopic = `${config.MQTT_TOPIC}/region_select`;
+                const regionLabel = `Region ${lastRegion + 1}`;
+                mqttReporter.publishStatus(regionStateTopic, { region: regionLabel });
             }
 
             // Subscribe to VFO select command topics so HA selections are reflected
@@ -451,29 +602,41 @@ if (mqttReporter) {
             mqttReporter.client.subscribe([vfo1CommandTopic, vfo2CommandTopic], (err) => {
                 if (!err) console.log('[MQTT] Subscribed to VFO command topics');
             });
-            
+
             // Subscribe to Volume command topic 
             const volumeCommandTopic = `${config.MQTT_TOPIC}/volume/set`;
             mqttReporter.client.subscribe(volumeCommandTopic, (err) => {
                 if (!err) console.log('[MQTT] Subscribed to Volume command topic');
             });
-            
+
             // Subscribe to Squelch command topic 
             const squelchCommandTopic = `${config.MQTT_TOPIC}/squelch/set`;
             mqttReporter.client.subscribe(squelchCommandTopic, (err) => {
                 if (!err) console.log('[MQTT] Subscribed to Squelch command topic');
             });
-            
+
             // Subscribe to Scan command topic 
             const scanCommandTopic = `${config.MQTT_TOPIC}/scan/set`;
             mqttReporter.client.subscribe(scanCommandTopic, (err) => {
                 if (!err) console.log('[MQTT] Subscribed to Scan command topic');
             });
-            
+
             // Subscribe to Double Channel command topic 
             const doubleChannelCommandTopic = `${config.MQTT_TOPIC}/double_channel/set`;
             mqttReporter.client.subscribe(doubleChannelCommandTopic, (err) => {
                 if (!err) console.log('[MQTT] Subscribed to Double Channel command topic');
+            });
+
+            // Subscribe to Region Select command topic 
+            const regionCommandTopic = `${config.MQTT_TOPIC}/region_select/set`;
+            mqttReporter.client.subscribe(regionCommandTopic, (err) => {
+                if (!err) console.log('[MQTT] Subscribed to Region Select command topic');
+            });
+
+            // Subscribe to GPS command topic
+            const gpsCommandTopic = `${config.MQTT_TOPIC}/gps/set`;
+            mqttReporter.client.subscribe(gpsCommandTopic, (err) => {
+                if (!err) console.log('[MQTT] Subscribed to GPS command topic');
             });
 
             if (!mqttReporter._vfoHandlerInstalled) {
@@ -569,6 +732,58 @@ if (mqttReporter) {
                             } else {
                                 console.warn(`[MQTT] Invalid dual watch state: ${msg} (expected ON or OFF)`);
                             }
+                        } else if (topic === regionCommandTopic) {
+                            const regionLabel = msg.trim();
+                            const match = regionLabel.match(/^Region (\d+)$/i);
+                            if (match) {
+                                const regionNumber = parseInt(match[1], 10);
+                                const regionIndex = regionNumber - 1; // Convert to 0-based index
+                                console.log(`[MQTT] Region set to: ${regionLabel} (index ${regionIndex})`);
+                                if (radio && typeof radio.setRegion === 'function') {
+                                    radio.setRegion(regionIndex);
+                                }
+                                // Optimistically publish the new region state 
+                                mqttReporter.publishStatus(`${config.MQTT_TOPIC}/region_select`, { region: regionLabel });
+                            } else {
+                                console.warn(`[MQTT] Invalid region format: ${msg} (expected "Region N")`);
+                            }
+                        } else if (topic === gpsCommandTopic) {
+                            const gpsState = msg.trim().toUpperCase();
+                            if (gpsState === 'ON' || gpsState === 'OFF') {
+                                const enableGps = (gpsState === 'ON');
+                                console.log(`[MQTT] GPS set to: ${gpsState}`);
+                                if (radio && typeof radio.setGpsEnabled === 'function') {
+                                    radio.setGpsEnabled(enableGps);
+                                }
+                                // Optimistically publish the new GPS state
+                                mqttReporter.publishStatus(`${config.MQTT_TOPIC}/gps`, { gps: gpsState });
+
+                                // Set GPS sensor state based on GPS enable/disable
+                                if (enableGps) {
+                                    // When GPS is enabled, publish initial "waiting for GPS" position data
+                                    const gpsPositionTopic = `${config.MQTT_TOPIC}/gps_position`;
+                                    const waitingPositionData = {
+                                        latitude: 0,
+                                        longitude: 0,
+                                        altitude: 0,
+                                        speed: 0,
+                                        heading: 0,
+                                        accuracy: 0,
+                                        locked: false,
+                                        lock_status: "Waiting for GPS",
+                                        latitude_dms: "Waiting for GPS",
+                                        longitude_dms: "Waiting for GPS",
+                                        timestamp: new Date().toISOString()
+                                    };
+                                    mqttReporter.publishStatus(gpsPositionTopic, waitingPositionData);
+                                    //console.log(`[MQTT] DEBUG: Published initial GPS position data to ${gpsPositionTopic}`);
+                                } else {
+                                    console.log('[MQTT] DEBUG: GPS disabled, publishing disabled state');
+                                    publishGpsDisabledState();
+                                }
+                            } else {
+                                console.warn(`[MQTT] Invalid GPS state: ${msg} (expected ON or OFF)`);
+                            }
                         }
                     } catch (e) {
                         console.error('[MQTT] Error handling message:', e.message);
@@ -593,34 +808,6 @@ if (mqttReporter) {
     // Also attempt to install handlers immediately in case the original connect was called earlier
     installPostConnectHandlers();
 
-}
-
-// Helper to publish channel sensor discovery and state
-function publishHtStatus(info) {
-    if (!mqttReporter || !info || !info.channel_id) return;
-    const uniqueId = `uvpro_radio_${RADIO_STATIONID}`;
-
-    // Publish dedicated curr_region sensor
-    const regionSensorTopic = `homeassistant/sensor/uvpro_radio_region/config`;
-    const regionStateTopic = `${config.MQTT_TOPIC}/region`;
-    const regionSensorConfig = {
-        name: 'UVPro Radio Current Region',
-        state_topic: regionStateTopic,
-        unique_id: `${uniqueId}_region`,
-        device: {
-            identifiers: [uniqueId],
-            name: 'UVPro Radio',
-            manufacturer: 'BTech',
-            model: 'UV-Pro'
-        },
-        value_template: '{{ value_json.curr_region }}'
-    };
-    let curr_region = (radio.htStatus && typeof radio.htStatus.curr_region === 'number')
-        ? radio.htStatus.curr_region
-        : (info.value.curr_region);
-    mqttReporter.publishStatus(regionSensorTopic, regionSensorConfig);
-    mqttReporter.publishStatus(regionStateTopic, { curr_region });
-    console.log('[MQTT] Published channel and region sensor discovery and state.');
 }
 
 // (moved shared state declarations earlier)
@@ -656,51 +843,113 @@ function publishFirmwareVersionSensor(devInfo) {
     console.log('[MQTT] Published Firmware Version sensor:', versionString);
 }
 
-// (moved shared state declarations earlier)
+// Helper to publish GPS "disabled" state when GPS is disabled
+function publishGpsDisabledState() {
+    if (!mqttReporter || !config.MQTT_TOPIC) return;
+    
+    const gpsPositionTopic = `${config.MQTT_TOPIC}/gps_position`;
+    // Publish "GPS disabled" state with clear indication
+    const disabledPositionData = {
+        latitude: null,
+        longitude: null,
+        altitude: null,
+        speed: null,
+        heading: null,
+        accuracy: null,
+        locked: false,
+        lock_status: "GPS Disabled",
+        latitude_dms: "GPS Disabled",
+        longitude_dms: "GPS Disabled",
+        timestamp: new Date().toISOString()
+    };
+    mqttReporter.publishStatus(gpsPositionTopic, disabledPositionData);
+    //console.log(`[MQTT] DEBUG: Published GPS disabled state to ${gpsPositionTopic}`);
+}// Helper to republish GPS sensor discovery configs (useful for troubleshooting)
+function republishGpsDiscoveryConfigs() {
+    if (!mqttReporter || !config.MQTT_TOPIC) return;
 
-// Helper to publish Channel A and Channel B sensors
-function publishChannelABSensors(settings) {
-    if (!mqttReporter || !settings) return;
     const uniqueId = `uvpro_radio_${RADIO_STATIONID}`;
-    // Channel A sensor
-    const channelASensorTopic = `homeassistant/sensor/uvpro_radio_channel_a/config`;
-    const channelAStateTopic = `${config.MQTT_TOPIC}/channel_a`;
-    const channelASensorConfig = {
-        name: 'UVPro Radio Channel A',
-        state_topic: channelAStateTopic,
-        unique_id: `${uniqueId}_channel_a`,
-        device: {
-            identifiers: [uniqueId],
-            name: 'UVPro Radio',
-            manufacturer: 'BTech',
-            model: 'UV-Pro'
-        },
-        value_template: '{{ value_json.channel_a }}',
-        icon: 'mdi:gauge',
-    };
-    mqttReporter.publishStatus(channelASensorTopic, channelASensorConfig);
-    mqttReporter.publishStatus(channelAStateTopic, { channel_a: settings.channel_a });
+    const gpsStateTopic = `${config.MQTT_TOPIC}/gps_position`;
 
-    // Channel B sensor
-    const channelBSensorTopic = `homeassistant/sensor/uvpro_radio_channel_b/config`;
-    const channelBStateTopic = `${config.MQTT_TOPIC}/channel_b`;
-    const channelBSensorConfig = {
-        name: 'UVPro Radio Channel B',
-        state_topic: channelBStateTopic,
-        unique_id: `${uniqueId}_channel_b`,
-        device: {
-            identifiers: [uniqueId],
-            name: 'UVPro Radio',
-            manufacturer: 'BTech',
-            model: 'UV-Pro'
+    // Re-publish all GPS sensor discovery configs (simplified without availability)
+    const sensors = [
+        {
+            topic: `homeassistant/sensor/uvpro_radio_gps_lat/config`,
+            config: {
+                name: 'UVPro Radio GPS Latitude',
+                state_topic: gpsStateTopic,
+                unique_id: `${uniqueId}_gps_lat`,
+                device: {
+                    identifiers: [uniqueId],
+                    name: 'UVPro Radio',
+                    manufacturer: 'BTech',
+                    model: 'UV-Pro'
+                },
+                value_template: '{{ value_json.latitude }}',
+                unit_of_measurement: '°',
+                icon: 'mdi:latitude'
+            }
         },
-        value_template: '{{ value_json.channel_b }}',
-        icon: 'mdi:gauge',
-    };
-    mqttReporter.publishStatus(channelBSensorTopic, channelBSensorConfig);
-    mqttReporter.publishStatus(channelBStateTopic, { channel_b: settings.channel_b });
-    console.log('[MQTT] Published Channel A and Channel B sensors.');
+        {
+            topic: `homeassistant/sensor/uvpro_radio_gps_lng/config`,
+            config: {
+                name: 'UVPro Radio GPS Longitude',
+                state_topic: gpsStateTopic,
+                unique_id: `${uniqueId}_gps_lng`,
+                device: {
+                    identifiers: [uniqueId],
+                    name: 'UVPro Radio',
+                    manufacturer: 'BTech',
+                    model: 'UV-Pro'
+                },
+                value_template: '{{ value_json.longitude }}',
+                unit_of_measurement: '°',
+                icon: 'mdi:longitude'
+            }
+        },
+        {
+            topic: `homeassistant/sensor/uvpro_radio_gps_alt/config`,
+            config: {
+                name: 'UVPro Radio GPS Altitude',
+                state_topic: gpsStateTopic,
+                unique_id: `${uniqueId}_gps_alt`,
+                device: {
+                    identifiers: [uniqueId],
+                    name: 'UVPro Radio',
+                    manufacturer: 'BTech',
+                    model: 'UV-Pro'
+                },
+                value_template: '{{ value_json.altitude }}',
+                unit_of_measurement: 'm',
+                icon: 'mdi:altimeter'
+            }
+        },
+        {
+            topic: `homeassistant/sensor/uvpro_radio_gps_lock/config`,
+            config: {
+                name: 'UVPro Radio GPS Lock',
+                state_topic: gpsStateTopic,
+                unique_id: `${uniqueId}_gps_lock`,
+                device: {
+                    identifiers: [uniqueId],
+                    name: 'UVPro Radio',
+                    manufacturer: 'BTech',
+                    model: 'UV-Pro'
+                },
+                value_template: '{{ value_json.lock_status }}',
+                icon: 'mdi:satellite-variant'
+            }
+        }
+    ];
+
+    sensors.forEach(sensor => {
+        mqttReporter.publishStatus(sensor.topic, sensor.config);
+    });
+
+    console.log('[MQTT] Republished GPS sensor discovery configs');
 }
+
+// (moved shared state declarations earlier)
 
 // Helper to publish VFO select sensors (VFO1, VFO2)
 function publishVfoSelects(channels, channelAIndex, channelBIndex) {
@@ -772,4 +1021,45 @@ function publishVfoSelects(channels, channelAIndex, channelBIndex) {
     //console.log('[MQTT] Published VFO1/VFO2 select discovery and initial state.');
 
     lastPublishedVfoOptions = optionsKey;
+}
+
+// Helper to publish Region select sensor
+function publishRegionSelect(regionCount) {
+    if (!mqttReporter || typeof regionCount !== 'number' || regionCount <= 0) return;
+
+    const uniqueId = `uvpro_radio_${RADIO_STATIONID}`;
+    const regionSelectTopic = `homeassistant/select/uvpro_radio_region/config`;
+    const regionStateTopic = `${config.MQTT_TOPIC}/region_select`;
+    const regionCommandTopic = `${config.MQTT_TOPIC}/region_select/set`;
+
+    // Build options like "Region 1", "Region 2", etc.
+    const options = [];
+    for (let i = 1; i <= regionCount; i++) {
+        options.push(`Region ${i}`);
+    }
+
+    const regionSelectConfig = {
+        name: 'UVPro Radio Region',
+        command_topic: regionCommandTopic,
+        state_topic: regionStateTopic,
+        unique_id: `${uniqueId}_region_select`,
+        device: {
+            identifiers: [uniqueId],
+            name: 'UVPro Radio',
+            manufacturer: 'BTech',
+            model: 'UV-Pro'
+        },
+        options: options,
+        value_template: '{{ value_json.region }}',
+        icon: 'mdi:map'
+    };
+
+    mqttReporter.publishStatus(regionSelectTopic, regionSelectConfig);
+    console.log(`[MQTT] Published Region select discovery with ${regionCount} regions.`);
+
+    // Publish initial state if we know the current region
+    if (lastRegion !== null) {
+        const regionLabel = `Region ${lastRegion + 1}`;
+        mqttReporter.publishStatus(regionStateTopic, { region: regionLabel });
+    }
 }
