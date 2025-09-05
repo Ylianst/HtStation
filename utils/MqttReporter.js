@@ -208,6 +208,24 @@ class MqttReporter {
         console.log('[MQTT] Published Home Assistant GPS sensors discovery config.');
     }
 
+    publishAprsMessageSensor() {
+        const aprsStateTopic = `${this.config.MQTT_TOPIC}/aprs_message`;
+        
+        // APRS Message sensor
+        const aprsSensorTopic = `homeassistant/sensor/uvpro_radio_aprs_message/config`;
+        const aprsSensorConfig = {
+            name: 'My APRS Message',
+            state_topic: aprsStateTopic,
+            unique_id: `${this.uniqueId}_aprs_message`,
+            device: this.baseDevice,
+            value_template: '{{ value_json.message }}',
+            icon: 'mdi:message-text'
+        };
+        this.publishStatus(aprsSensorTopic, aprsSensorConfig);
+
+        console.log('[MQTT] Published Home Assistant APRS message sensor discovery config.');
+    }
+
     publishFirmwareVersionSensor(versionString) {
         const fwSensorTopic = `homeassistant/sensor/uvpro_radio_firmware/config`;
         const fwStateTopic = `${this.config.MQTT_TOPIC}/firmware_version`;
@@ -331,6 +349,7 @@ class MqttReporter {
         this.publishDualWatchSwitch();
         this.publishGpsSwitch();
         this.publishGpsSensors();
+        this.publishAprsMessageSensor();
         this.publishGpsDisabledState();
     }
 }

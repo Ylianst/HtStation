@@ -207,12 +207,127 @@ radio.on('infoUpdate', (info) => {
 
 // New handler for received TNC data frames
 const AX25Packet = require('./AX25Packet');
+const { AprsPacket } = require('./aprs');
 
 radio.on('data', (frame) => {
     // Attempt to decode AX.25 packet
     const packet = AX25Packet.decodeAX25Packet(frame);
     if (packet) {
         console.log('[App] Decoded AX.25 packet:', packet.toString());
+        console.log('[App] Formatted packet:', formatAX25PacketString(packet));
+        
+        // Check if this packet is from the APRS channel
+        if (packet.channel_name === 'APRS') {
+            console.log('[App] APRS packet detected, attempting to decode...');
+            
+            try {
+                // Create APRS input object from AX.25 packet
+                const aprsInput = {
+                    dataStr: packet.dataStr,
+                    addresses: packet.addresses
+                };
+                
+                const aprsPacket = AprsPacket.parse(aprsInput);
+                
+                if (aprsPacket) {
+                    console.log('[APRS] Successfully decoded APRS packet:');
+                    console.log(aprsPacket.toString());
+                    
+                    // Publish APRS messages to Home Assistant sensor
+                    if (aprsPacket.dataType === 'Message' && aprsPacket.messageData && mqttReporter && config.MQTT_TOPIC) {
+                        const senderAddress = packet.addresses.length > 1 ? packet.addresses[1] : packet.addresses[0];
+                        const senderCallsign = senderAddress.address + (senderAddress.SSID > 0 ? `-${senderAddress.SSID}` : '');
+                        const messageText = aprsPacket.messageData.msgText || '';
+                        const formattedMessage = `${senderCallsign} > ${messageText}`;
+                        const aprsMessageTopic = `${config.MQTT_TOPIC}/aprs_message`;
+                        const messageData = {
+                            message: formattedMessage,
+                            sender: senderCallsign,
+                            text: messageText,
+                            timestamp: new Date().toISOString()
+                        };
+                        mqttReporter.publishStatus(aprsMessageTopic, messageData);
+                        console.log(`[MQTT] Published APRS message to Home Assistant: "${formattedMessage}"`);
+                    }
+                    
+                    // Check if this is a message intended for our station
+                    if (aprsPacket.dataType === 'Message' && aprsPacket.messageData) {
+                        const addressee = aprsPacket.messageData.addressee.trim().toUpperCase();
+                        const ourCallsign = RADIO_CALLSIGN.toUpperCase();
+                        
+                        // Check if message is addressed to us (with or without SSID)
+                        const isForUs = addressee === ourCallsign || 
+                                       addressee === `${ourCallsign}-${RADIO_STATIONID}`;
+                        
+                        if (isForUs && aprsPacket.messageData.msgType === 'Message' && aprsPacket.messageData.seqId) {
+                            console.log(`[APRS] Message addressed to our station! Sending ACK for sequence ${aprsPacket.messageData.seqId}`);
+                            
+                            // Get sender callsign from first address (skip destination)
+                            const senderAddress = packet.addresses.length > 1 ? packet.addresses[1] : packet.addresses[0];
+                            const senderCallsign = senderAddress.address + (senderAddress.SSID > 0 ? `-${senderAddress.SSID}` : '');
+                            
+                            // Create APRS ACK message format: :SENDER   :ack{SEQID}
+                            const paddedSender = senderCallsign.padEnd(9, ' '); // APRS addressee field must be 9 chars
+                            const ackMessage = `:${paddedSender}:ack${aprsPacket.messageData.seqId}`;
+                            
+                            console.log(`[APRS] Sending ACK: "${ackMessage}"`);
+                            
+                            // Create reply packet with same addresses but set our callsign in position 1
+                            if (packet.addresses.length > 1) {
+                                const replyAddresses = [...packet.addresses];
+                                // Set our callsign and station ID in the second address position
+                                replyAddresses[1].address = RADIO_CALLSIGN;
+                                replyAddresses[1].SSID = RADIO_STATIONID;
+                                
+                                // Create reply packet with APRS ACK payload
+                                const AX25PacketClass = require('./AX25Packet');
+                                const ackPacket = new AX25PacketClass(
+                                    replyAddresses, 
+                                    packet.nr, 
+                                    packet.ns, 
+                                    packet.pollFinal, 
+                                    packet.command, 
+                                    packet.type, 
+                                    Buffer.from(ackMessage, 'utf8')
+                                );
+                                ackPacket.pid = packet.pid;
+                                ackPacket.channel_id = packet.channel_id;
+                                ackPacket.channel_name = packet.channel_name;
+                                
+                                // Serialize and send the ACK packet
+                                const serialized = ackPacket.ToByteArray ? ackPacket.ToByteArray() : (ackPacket.toByteArray ? ackPacket.toByteArray() : null);
+                                if (!serialized) {
+                                    console.warn('[APRS] ACK packet serialization failed:', ackPacket);
+                                } else if (typeof radio.sendTncFrame !== 'function') {
+                                    console.warn('[APRS] radio.sendTncFrame not implemented - cannot send ACK');
+                                } else {
+                                    radio.sendTncFrame({
+                                        channel_id: ackPacket.channel_id,
+                                        data: serialized
+                                    });
+                                    console.log(`[APRS] Sent ACK for message sequence ${aprsPacket.messageData.seqId} to ${senderCallsign}`);
+                                }
+                            }
+                        } else if (isForUs) {
+                            console.log('[APRS] Message addressed to our station (no sequence ID or not a regular message)');
+                        }
+                    }
+                    
+                    // Log any parse errors if present
+                    if (aprsPacket.parseErrors && aprsPacket.parseErrors.length > 0) {
+                        console.log('[APRS] Parse warnings:');
+                        aprsPacket.parseErrors.forEach(err => {
+                            console.log(`  ${err.error}`);
+                        });
+                    }
+                } else {
+                    console.log('[APRS] ERROR: Failed to parse APRS packet from channel APRS');
+                }
+            } catch (error) {
+                console.log(`[APRS] ERROR: Exception while parsing APRS packet: ${error.message}`);
+            }
+        }
+        
         // Check if first address matches our station AND SERVER is set to "echo"
         const firstAddr = packet.addresses[0];
         if (firstAddr.address === RADIO_CALLSIGN && firstAddr.SSID === RADIO_STATIONID) {
@@ -629,4 +744,46 @@ function publishRegionSelect(regionCount) {
     if (!mqttReporter || typeof regionCount !== 'number' || regionCount <= 0) return;
     
     mqttReporter.publishRegionSelect(regionCount, lastRegion);
+}
+
+/**
+ * Format an AX.25 packet into APRS-style string representation
+ * @param {object} packet - Decoded AX.25 packet
+ * @returns {string} Formatted packet string (e.g., "SQ7PFS-10>APRS,TCPIP*,qAC,T2SYDNEY:payload")
+ */
+function formatAX25PacketString(packet) {
+    if (!packet || !packet.addresses || packet.addresses.length < 2) {
+        return 'Invalid packet';
+    }
+
+    // Helper function to format a single address with SSID
+    const formatAddress = (addr) => {
+        if (!addr || !addr.address) return '';
+        if (addr.SSID && addr.SSID > 0) {
+            return `${addr.address}-${addr.SSID}`;
+        }
+        return addr.address;
+    };
+
+    // Source is addresses[1] (sender)
+    const source = formatAddress(packet.addresses[1]);
+    
+    // Destination is addresses[0] 
+    const destination = formatAddress(packet.addresses[0]);
+    
+    // Build the path string: source>destination[,repeaters...]
+    let pathString = `${source}>${destination}`;
+    
+    // Add any additional addresses (repeaters/digipeaters) starting from index 2
+    if (packet.addresses.length > 2) {
+        const repeaters = packet.addresses.slice(2).map(formatAddress).filter(addr => addr.length > 0);
+        if (repeaters.length > 0) {
+            pathString += ',' + repeaters.join(',');
+        }
+    }
+    
+    // Add the payload (dataStr or data)
+    const payload = packet.dataStr || (packet.data ? packet.data.toString() : '');
+    
+    return `${pathString}:${payload}`;
 }
