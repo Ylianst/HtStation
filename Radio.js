@@ -504,7 +504,7 @@ class Radio extends EventEmitter {
                             case 4: // BATTERY_LEVEL_AS_PERCENTAGE
                                 const batteryPercent = value[7];
                                 this.emit('infoUpdate', { type: 'BatteryAsPercentage', value: batteryPercent });
-                                console.log(`[Radio] BatteryAsPercentage: ${batteryPercent}`);
+                                //console.log(`[Radio] BatteryAsPercentage: ${batteryPercent}`);
                                 break;
                             default:
                                 console.log(`[Radio] Unexpected Power Status: ${powerStatus}`);

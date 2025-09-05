@@ -213,32 +213,37 @@ radio.on('data', (frame) => {
     const packet = AX25Packet.decodeAX25Packet(frame);
     if (packet) {
         console.log('[App] Decoded AX.25 packet:', packet.toString());
-        // Check if first address matches our station
+        // Check if first address matches our station AND SERVER is set to "echo"
         const firstAddr = packet.addresses[0];
         if (firstAddr.address === RADIO_CALLSIGN && firstAddr.SSID === RADIO_STATIONID) {
-            // Prepare reply: flip first and second address
-            if (packet.addresses.length > 1) {
-                const replyAddresses = [...packet.addresses];
-                [replyAddresses[0], replyAddresses[1]] = [replyAddresses[1], replyAddresses[0]];
-                // Create reply packet
-                const AX25PacketClass = require('./AX25Packet');
-                const replyPacket = new AX25PacketClass(replyAddresses, packet.nr, packet.ns, packet.pollFinal, packet.command, packet.type, packet.data);
-                replyPacket.pid = packet.pid;
-                replyPacket.channel_id = packet.channel_id;
-                replyPacket.channel_name = packet.channel_name;
-                // Serialize replyPacket with header and addresses
-                const serialized = replyPacket.ToByteArray ? replyPacket.ToByteArray() : (replyPacket.toByteArray ? replyPacket.toByteArray() : null);
-                if (!serialized) {
-                    console.warn('[App] AX.25 packet serialization failed:', replyPacket);
-                } else if (typeof radio.sendTncFrame !== 'function') {
-                    console.warn('[App] radio.sendTncFrame not implemented.');
-                } else {
-                    radio.sendTncFrame({
-                        channel_id: replyPacket.channel_id,
-                        data: serialized
-                    });
-                    console.log('[App] Echoed AX.25 packet back to sender.');
+            // Only echo if SERVER is set to "echo"
+            if (config.SERVER && config.SERVER.toLowerCase() === 'echo') {
+                // Prepare reply: flip first and second address
+                if (packet.addresses.length > 1) {
+                    const replyAddresses = [...packet.addresses];
+                    [replyAddresses[0], replyAddresses[1]] = [replyAddresses[1], replyAddresses[0]];
+                    // Create reply packet
+                    const AX25PacketClass = require('./AX25Packet');
+                    const replyPacket = new AX25PacketClass(replyAddresses, packet.nr, packet.ns, packet.pollFinal, packet.command, packet.type, packet.data);
+                    replyPacket.pid = packet.pid;
+                    replyPacket.channel_id = packet.channel_id;
+                    replyPacket.channel_name = packet.channel_name;
+                    // Serialize replyPacket with header and addresses
+                    const serialized = replyPacket.ToByteArray ? replyPacket.ToByteArray() : (replyPacket.toByteArray ? replyPacket.toByteArray() : null);
+                    if (!serialized) {
+                        console.warn('[App] AX.25 packet serialization failed:', replyPacket);
+                    } else if (typeof radio.sendTncFrame !== 'function') {
+                        console.warn('[App] radio.sendTncFrame not implemented.');
+                    } else {
+                        radio.sendTncFrame({
+                            channel_id: replyPacket.channel_id,
+                            data: serialized
+                        });
+                        console.log('[App] Echoed AX.25 packet back to sender.');
+                    }
                 }
+            } else {
+                console.log('[App] AX.25 packet addressed to our station - not echoing (SERVER != echo)');
             }
         }
     } else {
