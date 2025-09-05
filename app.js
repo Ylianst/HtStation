@@ -77,6 +77,34 @@ let lastGpsPosition = null;
 // Cache last published VFO options (JSON string) so we republish if names change
 let lastPublishedVfoOptions = null;
 
+// === APRS Message Duplicate Detection ===
+// In-memory table to track received APRS messages and prevent duplicate processing
+// Key format: "SENDER-SSID:SEQID", Value: { timestamp, messageText }
+const aprsMessageCache = new Map();
+const MAX_APRS_CACHE_SIZE = 100;
+
+// Function to add a message to the cache and maintain size limit
+function addToAprsCache(senderCallsign, seqId, messageText) {
+    const key = `${senderCallsign}:${seqId}`;
+    
+    // If cache is at limit, remove oldest entry
+    if (aprsMessageCache.size >= MAX_APRS_CACHE_SIZE) {
+        const firstKey = aprsMessageCache.keys().next().value;
+        aprsMessageCache.delete(firstKey);
+    }
+    
+    aprsMessageCache.set(key, {
+        timestamp: new Date().toISOString(),
+        messageText: messageText
+    });
+}
+
+// Function to check if a message is a duplicate
+function isAprsMessageDuplicate(senderCallsign, seqId) {
+    const key = `${senderCallsign}:${seqId}`;
+    return aprsMessageCache.has(key);
+}
+
 // Event listeners to receive updates from the radio
 radio.on('infoUpdate', (info) => {
     // Publish Firmware Version sensor when DevInfo is updated
@@ -230,24 +258,60 @@ radio.on('data', (frame) => {
                 const aprsPacket = AprsPacket.parse(aprsInput);
                 
                 if (aprsPacket) {
-                    console.log('[APRS] Successfully decoded APRS packet:');
-                    console.log(aprsPacket.toString());
+                    //console.log('[APRS] Successfully decoded APRS packet:');
+                    //console.log(aprsPacket.toString());
                     
                     // Publish APRS messages to Home Assistant sensor
                     if (aprsPacket.dataType === 'Message' && aprsPacket.messageData && mqttReporter && config.MQTT_TOPIC) {
                         const senderAddress = packet.addresses.length > 1 ? packet.addresses[1] : packet.addresses[0];
                         const senderCallsign = senderAddress.address + (senderAddress.SSID > 0 ? `-${senderAddress.SSID}` : '');
                         const messageText = aprsPacket.messageData.msgText || '';
-                        const formattedMessage = `${senderCallsign} > ${messageText}`;
-                        const aprsMessageTopic = `${config.MQTT_TOPIC}/aprs_message`;
-                        const messageData = {
-                            message: formattedMessage,
-                            sender: senderCallsign,
-                            text: messageText,
-                            timestamp: new Date().toISOString()
-                        };
-                        mqttReporter.publishStatus(aprsMessageTopic, messageData);
-                        console.log(`[MQTT] Published APRS message to Home Assistant: "${formattedMessage}"`);
+                        const seqId = aprsPacket.messageData.seqId;
+                        
+                        // Check for duplicate message
+                        const isDuplicate = seqId && isAprsMessageDuplicate(senderCallsign, seqId);
+                        
+                        if (!isDuplicate) {
+                            // Add to cache if we have a sequence ID
+                            if (seqId) {
+                                addToAprsCache(senderCallsign, seqId, messageText);
+                            }
+                            
+                            // Check if message is addressed to our station
+                            const addressee = aprsPacket.messageData.addressee.trim().toUpperCase();
+                            const ourCallsign = RADIO_CALLSIGN.toUpperCase();
+                            const isForUs = addressee === ourCallsign || 
+                                           addressee === `${ourCallsign}-${RADIO_STATIONID}`;
+                            
+                            // Format message based on whether it's for us or not
+                            let formattedMessage;
+                            if (isForUs) {
+                                // For messages to our station: "SENDER > message"
+                                formattedMessage = `${senderCallsign} > ${messageText}`;
+                            } else {
+                                // For messages to other stations: "SOURCE > DESTINATION : message"
+                                formattedMessage = `${senderCallsign} > ${addressee} : ${messageText}`;
+                            }
+                            
+                            // Choose the appropriate topic based on whether message is for us
+                            const aprsMessageTopic = isForUs ? 
+                                `${config.MQTT_TOPIC}/aprs_message` : 
+                                `${config.MQTT_TOPIC}/aprs_message_other`;
+                            
+                            const messageData = {
+                                message: formattedMessage,
+                                sender: senderCallsign,
+                                addressee: addressee,
+                                text: messageText,
+                                timestamp: new Date().toISOString()
+                            };
+                            
+                            mqttReporter.publishStatus(aprsMessageTopic, messageData);
+                            const sensorType = isForUs ? "My APRS Message" : "APRS Message";
+                            console.log(`[MQTT] Published to ${sensorType} sensor: "${formattedMessage}"`);
+                        } else {
+                            console.log(`[APRS] Duplicate message detected from ${senderCallsign} with sequence ${seqId} - skipping MQTT publish`);
+                        }
                     }
                     
                     // Check if this is a message intended for our station
@@ -260,15 +324,23 @@ radio.on('data', (frame) => {
                                        addressee === `${ourCallsign}-${RADIO_STATIONID}`;
                         
                         if (isForUs && aprsPacket.messageData.msgType === 'Message' && aprsPacket.messageData.seqId) {
-                            console.log(`[APRS] Message addressed to our station! Sending ACK for sequence ${aprsPacket.messageData.seqId}`);
-                            
-                            // Get sender callsign from first address (skip destination)
                             const senderAddress = packet.addresses.length > 1 ? packet.addresses[1] : packet.addresses[0];
                             const senderCallsign = senderAddress.address + (senderAddress.SSID > 0 ? `-${senderAddress.SSID}` : '');
+                            const seqId = aprsPacket.messageData.seqId;
                             
+                            // Check if this is a duplicate message
+                            const isDuplicate = isAprsMessageDuplicate(senderCallsign, seqId);
+                            
+                            if (isDuplicate) {
+                                console.log(`[APRS] Duplicate message from ${senderCallsign} sequence ${seqId} - sending ACK but not processing further`);
+                            } else {
+                                console.log(`[APRS] Message addressed to our station! Sending ACK for sequence ${seqId}`);
+                            }
+                            
+                            // Always send ACK, even for duplicates (in case original ACK was lost)
                             // Create APRS ACK message format: :SENDER   :ack{SEQID}
                             const paddedSender = senderCallsign.padEnd(9, ' '); // APRS addressee field must be 9 chars
-                            const ackMessage = `:${paddedSender}:ack${aprsPacket.messageData.seqId}`;
+                            const ackMessage = `:${paddedSender}:ack${seqId}`;
                             
                             console.log(`[APRS] Sending ACK: "${ackMessage}"`);
                             

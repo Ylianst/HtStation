@@ -210,8 +210,9 @@ class MqttReporter {
 
     publishAprsMessageSensor() {
         const aprsStateTopic = `${this.config.MQTT_TOPIC}/aprs_message`;
+        const aprsOtherStateTopic = `${this.config.MQTT_TOPIC}/aprs_message_other`;
         
-        // APRS Message sensor
+        // My APRS Message sensor (messages addressed to our station)
         const aprsSensorTopic = `homeassistant/sensor/uvpro_radio_aprs_message/config`;
         const aprsSensorConfig = {
             name: 'My APRS Message',
@@ -223,7 +224,19 @@ class MqttReporter {
         };
         this.publishStatus(aprsSensorTopic, aprsSensorConfig);
 
-        console.log('[MQTT] Published Home Assistant APRS message sensor discovery config.');
+        // APRS Message sensor (messages not addressed to our station)
+        const aprsOtherSensorTopic = `homeassistant/sensor/uvpro_radio_aprs_message_other/config`;
+        const aprsOtherSensorConfig = {
+            name: 'APRS Message',
+            state_topic: aprsOtherStateTopic,
+            unique_id: `${this.uniqueId}_aprs_message_other`,
+            device: this.baseDevice,
+            value_template: '{{ value_json.message }}',
+            icon: 'mdi:message-outline'
+        };
+        this.publishStatus(aprsOtherSensorTopic, aprsOtherSensorConfig);
+
+        console.log('[MQTT] Published Home Assistant APRS message sensors discovery config.');
     }
 
     publishFirmwareVersionSensor(versionString) {

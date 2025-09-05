@@ -244,7 +244,7 @@ class Radio extends EventEmitter {
     sendTncFrame(opts) {
         // Print the full frame data in HEX before fragmenting
         const data = Buffer.isBuffer(opts.data) ? opts.data : Buffer.from(opts.data);
-        console.log(`[Radio] sendTncFrame() full data: ${bytesToHex(data)}`);
+        //console.log(`[Radio] sendTncFrame() full data: ${bytesToHex(data)}`);
         const MAX_MTU = 50;
         if (!opts || typeof opts.channel_id !== 'number' || !opts.data) {
             console.error('[Radio] sendTncFrame: Invalid arguments');
@@ -266,7 +266,7 @@ class Radio extends EventEmitter {
                 fragData,
                 Buffer.from([channel_id])
             ]);
-            console.log(`[Radio] Queued TNC frame for send: ${bytesToHex(packet)}`);
+            //console.log(`[Radio] Queued TNC frame for send: ${bytesToHex(packet)}`);
             this._tncOutboundQueue.push(packet);
             offset += fragLen;
             fragment_id++;
