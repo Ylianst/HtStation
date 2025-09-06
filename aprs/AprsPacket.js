@@ -316,22 +316,22 @@ class AprsPacket {
                 const lastBrace = msgContent.lastIndexOf('}');
                 if (lastBrace >= 0) {
                     this.messageData.authCode = msgContent.substring(lastBrace + 1);
-                    msgContent = msgContent.substring(0, lastBrace - 1);
+                    msgContent = msgContent.substring(0, lastBrace);
                 }
                 this.messageData.msgType = MessageType.Ack;
                 this.messageData.seqId = msgContent.substring(3).trim();
-                this.messageData.msgText = '';
+                this.messageData.msgText = msgContent; // Preserve full ACK message text
                 return;
             }
             if (msgContent.toUpperCase().startsWith('REJ')) {
                 const lastBrace = msgContent.lastIndexOf('}');
                 if (lastBrace >= 0) {
                     this.messageData.authCode = msgContent.substring(lastBrace + 1);
-                    msgContent = msgContent.substring(0, lastBrace - 1);
+                    msgContent = msgContent.substring(0, lastBrace);
                 }
                 this.messageData.msgType = MessageType.Reject;
                 this.messageData.seqId = msgContent.substring(3).trim();
-                this.messageData.msgText = '';
+                this.messageData.msgText = msgContent; // Preserve full REJ message text
                 return;
             }
         }

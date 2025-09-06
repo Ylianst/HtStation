@@ -210,9 +210,10 @@ class MqttReporter {
 
     publishAprsMessageSensor() {
         const aprsStateTopic = `${this.config.MQTT_TOPIC}/aprs_message`;
+        const aprsTrustedStateTopic = `${this.config.MQTT_TOPIC}/aprs_message_trusted`;
         const aprsOtherStateTopic = `${this.config.MQTT_TOPIC}/aprs_message_other`;
         
-        // My APRS Message sensor (messages addressed to our station)
+        // My APRS Message sensor (messages addressed to our station, not authenticated)
         const aprsSensorTopic = `homeassistant/sensor/uvpro_radio_aprs_message/config`;
         const aprsSensorConfig = {
             name: 'My APRS Message',
@@ -223,6 +224,18 @@ class MqttReporter {
             icon: 'mdi:message-text'
         };
         this.publishStatus(aprsSensorTopic, aprsSensorConfig);
+
+        // My Trusted APRS Message sensor (messages addressed to our station with successful authentication)
+        const aprsTrustedSensorTopic = `homeassistant/sensor/uvpro_radio_aprs_message_trusted/config`;
+        const aprsTrustedSensorConfig = {
+            name: 'My Trusted APRS Message',
+            state_topic: aprsTrustedStateTopic,
+            unique_id: `${this.uniqueId}_aprs_message_trusted`,
+            device: this.baseDevice,
+            value_template: '{{ value_json.message }}',
+            icon: 'mdi:message-lock'
+        };
+        this.publishStatus(aprsTrustedSensorTopic, aprsTrustedSensorConfig);
 
         // APRS Message sensor (messages not addressed to our station)
         const aprsOtherSensorTopic = `homeassistant/sensor/uvpro_radio_aprs_message_other/config`;

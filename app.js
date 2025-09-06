@@ -126,20 +126,85 @@ function requiresAuthentication(stationCallsign) {
     return stationAuthTable.has(upperCallsign);
 }
 
+// Function to compute APRS authentication code for outgoing messages
+function computeAprsAuthenticationCode(destinationCallsign, aprsMessage, msgId) {
+    console.log(`[APRS Auth] Computing auth code for outgoing message to ${destinationCallsign}`);
+    
+    // Normalize destination callsign
+    let upperDestination = destinationCallsign.toUpperCase();
+    if (!upperDestination.includes('-')) {
+        upperDestination = `${upperDestination}-0`;
+    }
+    
+    // Get the shared secret (password) from config for the destination station
+    let sharedSecret = null;
+    if (config.AUTH && Array.isArray(config.AUTH)) {
+        for (const authEntryConfig of config.AUTH) {
+            const commaIndex = authEntryConfig.indexOf(',');
+            if (commaIndex === -1) continue;
+            
+            let configCallsign = authEntryConfig.substring(0, commaIndex).trim().toUpperCase();
+            if (!configCallsign.includes('-')) {
+                configCallsign = `${configCallsign}-0`;
+            }
+            
+            if (configCallsign === upperDestination) {
+                sharedSecret = authEntryConfig.substring(commaIndex + 1);
+                break;
+            }
+        }
+    }
+    
+    if (!sharedSecret) {
+        console.log(`[APRS Auth] No shared secret found for ${upperDestination} - cannot compute auth code`);
+        return null; // No shared secret for this destination
+    }
+    
+    // Compute SHA256 hash of the shared secret (SecretKey)
+    const secretKey = crypto.createHash('sha256').update(sharedSecret, 'utf8').digest();
+    
+    // Get current time in minutes since January 1, 1970 UTC
+    const currentMinutes = Math.floor(Date.now() / (1000 * 60));
+    
+    // Our station callsign with SSID as source
+    const sourceStation = `${RADIO_CALLSIGN}-${RADIO_STATIONID}`;
+    
+    // Build hash message according to spec
+    let hashMessage;
+    if (msgId) {
+        // For messages with message ID (like ACK messages)
+        hashMessage = `${currentMinutes}:${sourceStation}:${upperDestination}:${aprsMessage}{${msgId}`;
+    } else {
+        // For messages without message ID
+        hashMessage = `${currentMinutes}:${sourceStation}:${upperDestination}:${aprsMessage}`;
+    }
+    
+    console.log(`[APRS Auth] Hash message for outgoing: ${hashMessage}`);
+    
+    // Compute HMAC-SHA256
+    const hmac = crypto.createHmac('sha256', secretKey);
+    hmac.update(Buffer.from(hashMessage, 'utf8'));
+    const computedToken = hmac.digest('base64').substring(0, 6);
+    
+    console.log(`[APRS Auth] Computed outgoing auth code: ${computedToken}`);
+    
+    return computedToken;
+}
+
 // Function to verify APRS message authentication
 function verifyAprsAuthentication(authCode, senderCallsign, aprsMessage, msgId, addressee) {
-    //console.log(`[APRS Auth DEBUG] Starting authentication for ${senderCallsign}`);
-    //console.log(`[APRS Auth DEBUG] Auth code: ${authCode}`);
-    //console.log(`[APRS Auth DEBUG] Message: ${aprsMessage}`);
-    //console.log(`[APRS Auth DEBUG] Msg ID: ${msgId}`);
-    //console.log(`[APRS Auth DEBUG] Addressee: "${addressee}"`);
+    console.log(`[APRS Auth DEBUG] Starting authentication for ${senderCallsign}`);
+    console.log(`[APRS Auth DEBUG] Auth code: ${authCode}`);
+    console.log(`[APRS Auth DEBUG] Message: ${aprsMessage}`);
+    console.log(`[APRS Auth DEBUG] Msg ID: ${msgId}`);
+    console.log(`[APRS Auth DEBUG] Addressee: "${addressee}"`);
     
     // Normalize sender callsign
     let upperSender = senderCallsign.toUpperCase();
     if (!upperSender.includes('-')) {
         upperSender = `${upperSender}-0`;
     }
-    //console.log(`[APRS Auth DEBUG] Normalized sender: ${upperSender}`);
+    console.log(`[APRS Auth DEBUG] Normalized sender: ${upperSender}`);
     
     // Check if we have authentication info for this station
     const authEntry = stationAuthTable.get(upperSender);
@@ -147,7 +212,7 @@ function verifyAprsAuthentication(authCode, senderCallsign, aprsMessage, msgId, 
         //console.log(`[APRS Auth DEBUG] No auth entry found for ${upperSender}`);
         return false; // No authentication entry for this station
     }
-    //console.log(`[APRS Auth DEBUG] Found auth entry for ${upperSender}`);
+    console.log(`[APRS Auth DEBUG] Found auth entry for ${upperSender}`);
     
     // Get the shared secret (password) from config
     // We need to find the original password, not the hash
@@ -173,19 +238,19 @@ function verifyAprsAuthentication(authCode, senderCallsign, aprsMessage, msgId, 
         //console.log(`[APRS Auth DEBUG] Could not find shared secret for ${upperSender}`);
         return false; // Could not find shared secret
     }
-    //console.log(`[APRS Auth DEBUG] Found shared secret: ${sharedSecret}`);
+    console.log(`[APRS Auth DEBUG] Found shared secret: ${sharedSecret}`);
     
     // Compute SHA256 hash of the shared secret (SecretKey)
     const secretKey = crypto.createHash('sha256').update(sharedSecret, 'utf8').digest();
-    //console.log(`[APRS Auth DEBUG] Secret key (hex): ${secretKey.toString('hex')}`);
+    console.log(`[APRS Auth DEBUG] Secret key (hex): ${secretKey.toString('hex')}`);
     
     // Get current time in minutes since January 1, 1970 UTC
     const currentMinutes = Math.floor(Date.now() / (1000 * 60));
-    //console.log(`[APRS Auth DEBUG] Current minutes: ${currentMinutes}`);
+    console.log(`[APRS Auth DEBUG] Current minutes: ${currentMinutes}`);
     
     // Use the addressee from the APRS message and trim to match C# implementation
     const destinationStation = addressee.trim();
-    //console.log(`[APRS Auth DEBUG] Destination station (from addressee): "${destinationStation}"`);
+    console.log(`[APRS Auth DEBUG] Destination station (from addressee): "${destinationStation}"`);
 
     // Try authentication with 4 minute window (current, 3 previous, 1 future)
     const minutesToTry = [
@@ -203,11 +268,11 @@ function verifyAprsAuthentication(authCode, senderCallsign, aprsMessage, msgId, 
             // For messages with message ID
             hashMessage = `${minutesUtc}:${upperSender}:${destinationStation}:${aprsMessage}{${msgId}`;
         } else {
-            // For messages without message ID
+            // For messages without message ID (including ACK messages)
             hashMessage = `${minutesUtc}:${upperSender}:${destinationStation}:${aprsMessage}`;
         }
         
-        //console.log(`[APRS Auth DEBUG] Hash message for minute ${minutesUtc}: ${hashMessage}`);
+        console.log(`[APRS Auth DEBUG] Hash message for minute ${minutesUtc}: ${hashMessage}`);
         
         const hmac = crypto.createHmac('sha256', secretKey);
         hmac.update(Buffer.from(hashMessage, 'utf8'));
@@ -305,6 +370,215 @@ function addToAprsCache(senderCallsign, seqId, messageText) {
 function isAprsMessageDuplicate(senderCallsign, seqId) {
     const key = `${senderCallsign}:${seqId}`;
     return aprsMessageCache.has(key);
+}
+
+// === APRS Message Sending Queue ===
+// Queue to track outgoing APRS messages awaiting ACK
+// Key format: "DESTINATION-SSID:SEQID", Value: { message, attempts, timer, requiresAuth, sentTime }
+const aprsOutgoingQueue = new Map();
+const MAX_RETRIES = 3;
+const RETRY_INTERVAL_MS = 20000; // 20 seconds
+
+// Generate a unique sequence ID for outgoing messages
+function generateAprsSequenceId() {
+    return Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+}
+
+// Generic method to send APRS messages with retry logic
+function AprsSendMessage(destinationCallsign, messageText, requiresAuth = null) {
+    // Auto-detect authentication requirement if not specified
+    if (requiresAuth === null) {
+        requiresAuth = requiresAuthentication(destinationCallsign);
+    }
+    
+    const seqId = generateAprsSequenceId();
+    const paddedDestination = destinationCallsign.padEnd(9, ' '); // APRS addressee field must be 9 chars
+    
+    // Create base APRS message format: :DEST     :messageText{SEQID}
+    let aprsMessage = `:${paddedDestination}:${messageText}{${seqId}`;
+    
+    // Add authentication if required
+    if (requiresAuth) {
+        const authCode = computeAprsAuthenticationCode(destinationCallsign, messageText, seqId);
+        if (authCode) {
+            aprsMessage = `:${paddedDestination}:${messageText}}${authCode}{${seqId}`;
+            console.log(`[APRS Send] Adding authentication to outgoing message: ${authCode}`);
+        } else {
+            console.error(`[APRS Send] Failed to compute authentication code for ${destinationCallsign}`);
+            return false; // Cannot send authenticated message without auth code
+        }
+    }
+    
+    console.log(`[APRS Send] Sending message to ${destinationCallsign}: "${messageText}" (Seq: ${seqId}, Auth: ${requiresAuth})`);
+    
+    // Send the message immediately
+    const success = sendAprsPacket(aprsMessage);
+    if (!success) {
+        console.error(`[APRS Send] Failed to send initial message to ${destinationCallsign}`);
+        return false;
+    }
+    
+    // Add to outgoing queue for ACK tracking
+    const queueKey = `${destinationCallsign.toUpperCase()}:${seqId}`;
+    const queueEntry = {
+        destinationCallsign: destinationCallsign,
+        messageText: messageText,
+        seqId: seqId,
+        aprsMessage: aprsMessage,
+        requiresAuth: requiresAuth,
+        attempts: 1,
+        sentTime: new Date(),
+        timer: null
+    };
+    
+    aprsOutgoingQueue.set(queueKey, queueEntry);
+    
+    // Set up retry timer
+    queueEntry.timer = setTimeout(() => {
+        retryAprsMessage(queueKey);
+    }, RETRY_INTERVAL_MS);
+    
+    console.log(`[APRS Send] Message queued for ACK tracking: ${queueKey}`);
+    return true;
+}
+
+// Retry sending an APRS message
+function retryAprsMessage(queueKey) {
+    const queueEntry = aprsOutgoingQueue.get(queueKey);
+    if (!queueEntry) {
+        console.log(`[APRS Send] Queue entry ${queueKey} not found for retry`);
+        return;
+    }
+    
+    if (queueEntry.attempts >= MAX_RETRIES) {
+        console.log(`[APRS Send] Max retries (${MAX_RETRIES}) reached for message to ${queueEntry.destinationCallsign}, giving up`);
+        aprsOutgoingQueue.delete(queueKey);
+        return;
+    }
+    
+    queueEntry.attempts++;
+    queueEntry.sentTime = new Date();
+    
+    console.log(`[APRS Send] Retrying message to ${queueEntry.destinationCallsign} (attempt ${queueEntry.attempts}/${MAX_RETRIES})`);
+    
+    // Send the message again
+    const success = sendAprsPacket(queueEntry.aprsMessage);
+    if (!success) {
+        console.error(`[APRS Send] Failed to send retry ${queueEntry.attempts} to ${queueEntry.destinationCallsign}`);
+    }
+    
+    // Set up next retry timer if not at max attempts
+    if (queueEntry.attempts < MAX_RETRIES) {
+        queueEntry.timer = setTimeout(() => {
+            retryAprsMessage(queueKey);
+        }, RETRY_INTERVAL_MS);
+    } else {
+        // This was the last attempt, queue entry will be cleaned up above
+        queueEntry.timer = null;
+    }
+}
+
+// Handle received ACK messages
+function handleReceivedAck(senderCallsign, ackSeqId, authCode, msgText) {
+    const queueKey = `${senderCallsign.toUpperCase()}:${ackSeqId}`;
+    const queueEntry = aprsOutgoingQueue.get(queueKey);
+    
+    if (!queueEntry) {
+        console.log(`[APRS ACK] Received ACK from ${senderCallsign} for sequence ${ackSeqId}, but no pending message found`);
+        return;
+    }
+    
+    // Check authentication if original message required auth
+    if (queueEntry.requiresAuth) {
+        if (!authCode) {
+            console.log(`[APRS ACK] ACK from ${senderCallsign} missing required authentication, ignoring`);
+            return;
+        }
+        
+        // Verify ACK authentication using the actual received message text
+        const isValidAuth = verifyAprsAuthentication(
+            authCode,
+            senderCallsign,
+            msgText, // Use actual message text from parsed packet
+            null, // ACK messages don't have message ID
+            `${RADIO_CALLSIGN}-${RADIO_STATIONID}` // ACK is addressed to us
+        );
+        
+        if (!isValidAuth) {
+            console.log(`[APRS ACK] ACK from ${senderCallsign} has invalid authentication, ignoring`);
+            return;
+        }
+        
+        console.log(`[APRS ACK] Authenticated ACK received from ${senderCallsign} for sequence ${ackSeqId}`);
+    } else {
+        console.log(`[APRS ACK] ACK received from ${senderCallsign} for sequence ${ackSeqId}`);
+    }
+    
+    // Clear retry timer and remove from queue
+    if (queueEntry.timer) {
+        clearTimeout(queueEntry.timer);
+    }
+    
+    aprsOutgoingQueue.delete(queueKey);
+    console.log(`[APRS ACK] Message to ${senderCallsign} successfully acknowledged, removed from queue`);
+}
+
+// Helper function to send APRS packet
+function sendAprsPacket(aprsMessage) {
+    // Find the APRS channel packet template from recent traffic
+    // This is a simplified approach - in practice you'd want to store channel info
+    console.log(`[APRS Send] Transmitting: "${aprsMessage}"`);
+    
+    // For now, we'll use a basic approach to send the packet
+    // In a real implementation, you'd create proper AX.25 packet with addresses
+    if (typeof radio.sendTncFrame !== 'function') {
+        console.warn('[APRS Send] radio.sendTncFrame not implemented - cannot send message');
+        return false;
+    }
+    
+    try {
+        // Create a basic AX.25 packet for APRS transmission
+        // This assumes we have an APRS channel configured (channel_id would need to be determined)
+        const AX25PacketClass = require('./AX25Packet');
+        const AX25Address = require('./AX25Address');
+        
+        // Create addresses array: [destination, source]
+        // For APRS, destination is typically "APRS" or similar
+        const addresses = [
+            new AX25Address('APRS', 0),
+            new AX25Address(RADIO_CALLSIGN, RADIO_STATIONID)
+        ];
+        
+        const packet = new AX25PacketClass(
+            addresses,
+            0, // nr
+            0, // ns
+            false, // pollFinal
+            true, // command
+            3, // UI frame type
+            Buffer.from(aprsMessage, 'utf8')
+        );
+        
+        packet.pid = 0xF0; // APRS protocol ID
+        packet.channel_id = 1; // Assume APRS is on channel 1 - this should be configurable
+        packet.channel_name = 'APRS';
+        
+        const serialized = packet.toByteArray();
+        if (!serialized) {
+            console.error('[APRS Send] Packet serialization failed');
+            return false;
+        }
+        
+        radio.sendTncFrame({
+            channel_id: packet.channel_id,
+            data: serialized
+        });
+        
+        return true;
+    } catch (error) {
+        console.error(`[APRS Send] Error sending packet: ${error.message}`);
+        return false;
+    }
 }
 
 // Event listeners to receive updates from the radio
@@ -460,26 +734,38 @@ radio.on('data', (frame) => {
                 const aprsPacket = AprsPacket.parse(aprsInput);
                 
                 if (aprsPacket) {
-                    console.log('[APRS] Successfully decoded APRS packet:');
-                    console.log(aprsPacket.toString());
+                    //console.log('[APRS] Successfully decoded APRS packet:');
+                    //console.log(aprsPacket.toString());
                     //console.log(aprsPacket);
                     
-                    // Publish APRS messages to Home Assistant sensor
-                    if (aprsPacket.dataType === 'Message' && aprsPacket.messageData && mqttReporter && config.MQTT_TOPIC) {
+                    // Perform duplicate detection once for all APRS message processing
+                    let isDuplicateMessage = false;
+                    let senderCallsign = '';
+                    let messageSeqId = null;
+                    
+                    if (aprsPacket.dataType === 'Message' && aprsPacket.messageData) {
                         const senderAddress = packet.addresses.length > 1 ? packet.addresses[1] : packet.addresses[0];
-                        const senderCallsign = senderAddress.address + (senderAddress.SSID > 0 ? `-${senderAddress.SSID}` : '');
-                        const messageText = aprsPacket.messageData.msgText || '';
-                        const seqId = aprsPacket.messageData.seqId;
+                        senderCallsign = senderAddress.address + (senderAddress.SSID > 0 ? `-${senderAddress.SSID}` : '');
+                        messageSeqId = aprsPacket.messageData.seqId;
                         
                         // Check for duplicate message
-                        const isDuplicate = seqId && isAprsMessageDuplicate(senderCallsign, seqId);
+                        isDuplicateMessage = messageSeqId && isAprsMessageDuplicate(senderCallsign, messageSeqId);
                         
-                        if (!isDuplicate) {
-                            // Add to cache if we have a sequence ID
-                            if (seqId) {
-                                addToAprsCache(senderCallsign, seqId, messageText);
-                            }
-                            
+                        if (!isDuplicateMessage && messageSeqId) {
+                            // Add to cache if we have a sequence ID and it's not a duplicate
+                            addToAprsCache(senderCallsign, messageSeqId, aprsPacket.messageData.msgText || '');
+                        }
+                    }
+
+                    // Publish APRS messages to Home Assistant sensor (exclude ACK messages)
+                    if (aprsPacket.dataType === 'Message' && aprsPacket.messageData && mqttReporter && config.MQTT_TOPIC) {
+                        const messageText = aprsPacket.messageData.msgText || '';
+                        
+                        // Filter out ACK messages from being published to Home Assistant sensors
+                        const isAckMessage = aprsPacket.messageData.msgType === 'Ack' || 
+                                           (aprsPacket.messageData.msgType === 'Message' && messageText.match(/^ack\d+$/));
+                        
+                        if (!isDuplicateMessage && !isAckMessage) {
                             // Check if message is addressed to our station
                             const addressee = aprsPacket.messageData.addressee.trim().toUpperCase();
                             const ourCallsign = RADIO_CALLSIGN.toUpperCase();
@@ -496,11 +782,6 @@ radio.on('data', (frame) => {
                                 formattedMessage = `${senderCallsign} > ${addressee} : ${messageText}`;
                             }
                             
-                            // Choose the appropriate topic based on whether message is for us
-                            const aprsMessageTopic = isForUs ? 
-                                `${config.MQTT_TOPIC}/aprs_message` : 
-                                `${config.MQTT_TOPIC}/aprs_message_other`;
-                            
                             // Check authentication for MQTT publishing if authCode is present
                             let authStatus = 'NONE';
                             if (aprsPacket.messageData.authCode) {
@@ -508,12 +789,33 @@ radio.on('data', (frame) => {
                                     aprsPacket.messageData.authCode,
                                     senderCallsign,
                                     aprsPacket.messageData.msgText,
-                                    seqId,
+                                    messageSeqId,
                                     aprsPacket.messageData.addressee
                                 );
                                 authStatus = isAuthenticated ? 'SUCCESS' : 'FAILED';
                             } else if (requiresAuthentication(senderCallsign)) {
                                 authStatus = 'REQUIRED_BUT_MISSING';
+                            }
+
+                            // Choose the appropriate topic based on whether message is for us and authentication status
+                            let aprsMessageTopic;
+                            let sensorType;
+                            
+                            if (isForUs) {
+                                // Message is for our station - check if it's authenticated
+                                if (authStatus === 'SUCCESS') {
+                                    // Successfully authenticated message for our station -> Trusted sensor
+                                    aprsMessageTopic = `${config.MQTT_TOPIC}/aprs_message_trusted`;
+                                    sensorType = "My Trusted APRS Message";
+                                } else {
+                                    // Non-authenticated or failed authentication for our station -> Regular sensor
+                                    aprsMessageTopic = `${config.MQTT_TOPIC}/aprs_message`;
+                                    sensorType = "My APRS Message";
+                                }
+                            } else {
+                                // Message for other stations -> Other sensor
+                                aprsMessageTopic = `${config.MQTT_TOPIC}/aprs_message_other`;
+                                sensorType = "APRS Message";
                             }
 
                             const messageData = {
@@ -526,10 +828,11 @@ radio.on('data', (frame) => {
                             };
                             
                             mqttReporter.publishStatus(aprsMessageTopic, messageData);
-                            const sensorType = isForUs ? "My APRS Message" : "APRS Message";
                             console.log(`[MQTT] Published to ${sensorType} sensor: "${formattedMessage}"`);
-                        } else {
-                            console.log(`[APRS] Duplicate message detected from ${senderCallsign} with sequence ${seqId} - skipping MQTT publish`);
+                        } else if (isDuplicateMessage) {
+                            console.log(`[APRS] Duplicate message detected from ${senderCallsign} with sequence ${messageSeqId} - skipping MQTT publish`);
+                        } else if (isAckMessage) {
+                            console.log(`[APRS] ACK message detected from ${senderCallsign} - skipping MQTT publish`);
                         }
                     }
                     
@@ -543,12 +846,7 @@ radio.on('data', (frame) => {
                                        addressee === `${ourCallsign}-${RADIO_STATIONID}`;
                         
                         if (isForUs && aprsPacket.messageData.msgType === 'Message' && aprsPacket.messageData.seqId) {
-                            const senderAddress = packet.addresses.length > 1 ? packet.addresses[1] : packet.addresses[0];
-                            const senderCallsign = senderAddress.address + (senderAddress.SSID > 0 ? `-${senderAddress.SSID}` : '');
                             const seqId = aprsPacket.messageData.seqId;
-                            
-                            // Check if this is a duplicate message
-                            const isDuplicate = isAprsMessageDuplicate(senderCallsign, seqId);
                             
                             // Check authentication if authCode is present
                             let authenticationResult = null;
@@ -562,22 +860,53 @@ radio.on('data', (frame) => {
                                 );
                                 authenticationResult = isAuthenticated ? 'SUCCESS' : 'FAILED';
                                 console.log(`[APRS Auth] Authentication ${authenticationResult} for message from ${senderCallsign} with auth code ${aprsPacket.messageData.authCode}`);
+                                
+                                // If authentication failed, stop processing this message
+                                if (authenticationResult === 'FAILED') {
+                                    console.log(`[APRS] Ignoring message from ${senderCallsign} due to authentication failure`);
+                                    return; // Stop processing this message
+                                }
                             } else if (requiresAuthentication(senderCallsign)) {
                                 authenticationResult = 'REQUIRED_BUT_MISSING';
                                 console.log(`[APRS Auth] Authentication REQUIRED but MISSING for message from ${senderCallsign}`);
                             }
                             
-                            if (isDuplicate) {
+                            if (isDuplicateMessage) {
                                 console.log(`[APRS] Duplicate message from ${senderCallsign} sequence ${seqId} - sending ACK but not processing further`);
                             } else {
                                 const authMsg = authenticationResult ? ` (Auth: ${authenticationResult})` : '';
                                 console.log(`[APRS] Message addressed to our station! Sending ACK for sequence ${seqId}${authMsg}`);
+                                
+                                // Check if this is an ECHO message (only process for non-duplicates)
+                                if (aprsPacket.messageData.msgText.startsWith('ECHO:')) {
+                                    const echoText = aprsPacket.messageData.msgText.substring(5); // Remove "ECHO:" prefix
+                                    console.log(`[APRS] ECHO request from ${senderCallsign}: "${echoText}"`);
+                                    
+                                    // Use AprsSendMessage for ECHO reply with authentication based on original message
+                                    const requiresAuth = (authenticationResult === 'SUCCESS');
+                                    const success = AprsSendMessage(senderCallsign, echoText, requiresAuth);
+                                    
+                                    if (success) {
+                                        console.log(`[APRS] Sent ECHO reply to ${senderCallsign}: "${echoText}" (Auth: ${requiresAuth})`);
+                                    } else {
+                                        console.error(`[APRS] Failed to send ECHO reply to ${senderCallsign}`);
+                                    }
+                                }
                             }
                             
                             // Always send ACK, even for duplicates (in case original ACK was lost)
                             // Create APRS ACK message format: :SENDER   :ack{SEQID}
                             const paddedSender = senderCallsign.padEnd(9, ' '); // APRS addressee field must be 9 chars
-                            const ackMessage = `:${paddedSender}:ack${seqId}`;
+                            let ackMessage = `:${paddedSender}:ack${seqId}`;
+                            
+                            // Add authentication to ACK if original message was authenticated successfully
+                            if (authenticationResult === 'SUCCESS') {
+                                const authCode = computeAprsAuthenticationCode(senderCallsign, `ack${seqId}`, null);
+                                if (authCode) {
+                                    ackMessage = `:${paddedSender}:ack${seqId}}${authCode}`;
+                                    console.log(`[APRS] Adding authentication to ACK: ${authCode}`);
+                                }
+                            }
                             
                             console.log(`[APRS] Sending ACK: "${ackMessage}"`);
                             
@@ -616,6 +945,33 @@ radio.on('data', (frame) => {
                                     });
                                     console.log(`[APRS] Sent ACK for message sequence ${aprsPacket.messageData.seqId} to ${senderCallsign}`);
                                 }
+                            }
+                        } else if (isForUs && aprsPacket.messageData.msgType === 'Ack') {
+                            // This is an ACK message
+                            const ackSeqId = aprsPacket.messageData.seqId;
+                            const senderAddress = packet.addresses.length > 1 ? packet.addresses[1] : packet.addresses[0];
+                            const senderCallsign = senderAddress.address + (senderAddress.SSID > 0 ? `-${senderAddress.SSID}` : '');
+                            
+                            console.log(`[APRS ACK] Received ACK from ${senderCallsign} for sequence ${ackSeqId}`);
+                            
+                            // Handle the ACK (this will check authentication if required)
+                            handleReceivedAck(senderCallsign, ackSeqId, aprsPacket.messageData.authCode, aprsPacket.messageData.msgText);
+                        } else if (isForUs && aprsPacket.messageData.msgType === 'Message') {
+                            // Check if this is an ACK message (fallback for incorrectly parsed ACKs)
+                            const messageText = aprsPacket.messageData.msgText || '';
+                            const ackMatch = messageText.match(/^ack(\d+)$/);
+                            
+                            if (ackMatch) {
+                                const ackSeqId = ackMatch[1];
+                                const senderAddress = packet.addresses.length > 1 ? packet.addresses[1] : packet.addresses[0];
+                                const senderCallsign = senderAddress.address + (senderAddress.SSID > 0 ? `-${senderAddress.SSID}` : '');
+                                
+                                console.log(`[APRS ACK] Received ACK from ${senderCallsign} for sequence ${ackSeqId} (fallback detection)`);
+                                
+                                // Handle the ACK (this will check authentication if required)
+                                handleReceivedAck(senderCallsign, ackSeqId, aprsPacket.messageData.authCode, aprsPacket.messageData.msgText);
+                            } else {
+                                console.log('[APRS] Message addressed to our station (no sequence ID or not a regular message)');
                             }
                         } else if (isForUs) {
                             console.log('[APRS] Message addressed to our station (no sequence ID or not a regular message)');
