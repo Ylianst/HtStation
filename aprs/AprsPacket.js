@@ -349,7 +349,7 @@ class AprsPacket {
         const lastBrace2 = this.messageData.msgText.lastIndexOf('}');
         if (lastBrace2 >= 0) {
             this.messageData.authCode = this.messageData.msgText.substring(lastBrace2 + 1);
-            this.messageData.msgText = this.messageData.msgText.substring(0, lastBrace2 - 1);
+            this.messageData.msgText = this.messageData.msgText.substring(0, lastBrace2);
         }
     }
 

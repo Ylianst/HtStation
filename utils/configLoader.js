@@ -15,7 +15,16 @@ function loadConfig(configPath) {
         if (idx === -1) continue;
         const key = trimmed.slice(0, idx).trim();
         const value = trimmed.slice(idx + 1).trim();
-        config[key] = value;
+        
+        // Handle multiple AUTH entries by storing them in an array
+        if (key === 'AUTH') {
+            if (!config.AUTH) {
+                config.AUTH = [];
+            }
+            config.AUTH.push(value);
+        } else {
+            config[key] = value;
+        }
     }
     return config;
 }

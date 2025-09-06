@@ -1,6 +1,7 @@
 'use strict';
 
 const path = require('path');
+const crypto = require('crypto');
 const { loadConfig } = require('./utils/configLoader');
 const Radio = require('./Radio.js');
 const MqttReporter = require('./utils/MqttReporter');
@@ -16,7 +17,27 @@ try {
 
 console.log('[App] Loaded settings from config.ini:');
 for (const [key, value] of Object.entries(config)) {
-    console.log(`  ${key} = ${value}`);
+    if (key === 'AUTH') {
+        // Display AUTH entries without revealing passwords
+        if (Array.isArray(value)) {
+            const maskedAuth = value.map(authEntry => {
+                const commaIndex = authEntry.indexOf(',');
+                if (commaIndex !== -1) {
+                    const callsign = authEntry.substring(0, commaIndex);
+                    return `${callsign},***`;
+                }
+                return authEntry;
+            });
+            console.log(`  ${key} = ${maskedAuth.join(',')}`);
+        } else {
+            console.log(`  ${key} = ${value}`);
+        }
+    } else if (key === 'MQTT_PASSWORD') {
+        // Also mask MQTT password for security
+        console.log(`  ${key} = ***`);
+    } else {
+        console.log(`  ${key} = ${value}`);
+    }
 }
 
 const RADIO_MAC_ADDRESS = config.MACADDRESS;
@@ -25,6 +46,184 @@ const RADIO_STATIONID = config.STATIONID ? parseInt(config.STATIONID, 10) : unde
 if (!RADIO_MAC_ADDRESS || !RADIO_CALLSIGN || RADIO_STATIONID === undefined || isNaN(RADIO_STATIONID)) {
     console.error('[App] Missing required settings in config.ini (MACADDRESS, CALLSIGN, STATIONID).');
     process.exit(1);
+}
+
+// === Station Authentication Table ===
+// Load AUTH entries from config and create authentication table
+// Each entry maps station callsign+SSID to SHA256 hash of password
+const stationAuthTable = new Map();
+
+if (config.AUTH && Array.isArray(config.AUTH)) {
+    console.log('[App] Loading station authentication entries...');
+    
+    for (const authEntry of config.AUTH) {
+        // Parse AUTH entry format: "CALLSIGN-SSID,password"
+        const commaIndex = authEntry.indexOf(',');
+        if (commaIndex === -1) {
+            console.warn(`[App] Invalid AUTH entry format (missing comma): ${authEntry}`);
+            continue;
+        }
+        
+        let stationCallsign = authEntry.substring(0, commaIndex).trim().toUpperCase();
+        const stationPassword = authEntry.substring(commaIndex + 1);
+        
+        if (!stationCallsign || !stationPassword) {
+            console.warn(`[App] Invalid AUTH entry (empty callsign or password): ${authEntry}`);
+            continue;
+        }
+        
+        // If no SSID is specified, assume SSID 0
+        if (!stationCallsign.includes('-')) {
+            stationCallsign = `${stationCallsign}-0`;
+        }
+        
+        // Create SHA256 hash of the password
+        const passwordHash = crypto.createHash('sha256').update(stationPassword).digest('hex');
+        
+        // Store in authentication table
+        stationAuthTable.set(stationCallsign, {
+            callsign: stationCallsign,
+            passwordHash: passwordHash
+        });
+        
+        console.log(`[App] Added authentication entry for station: ${stationCallsign}`);
+    }
+    
+    console.log(`[App] Station authentication table loaded with ${stationAuthTable.size} entries`);
+} else {
+    console.log('[App] No AUTH entries found in configuration');
+}
+
+// Function to verify station authentication
+function verifyStationAuthentication(stationCallsign, password) {
+    let upperCallsign = stationCallsign.toUpperCase();
+    
+    // If no SSID is specified, assume SSID 0
+    if (!upperCallsign.includes('-')) {
+        upperCallsign = `${upperCallsign}-0`;
+    }
+    
+    const authEntry = stationAuthTable.get(upperCallsign);
+    
+    if (!authEntry) {
+        return false; // Station not in authentication table
+    }
+    
+    // Hash the provided password and compare with stored hash
+    const providedHash = crypto.createHash('sha256').update(password).digest('hex');
+    return providedHash === authEntry.passwordHash;
+}
+
+// Function to check if station requires authentication
+function requiresAuthentication(stationCallsign) {
+    let upperCallsign = stationCallsign.toUpperCase();
+    
+    // If no SSID is specified, assume SSID 0
+    if (!upperCallsign.includes('-')) {
+        upperCallsign = `${upperCallsign}-0`;
+    }
+    
+    return stationAuthTable.has(upperCallsign);
+}
+
+// Function to verify APRS message authentication
+function verifyAprsAuthentication(authCode, senderCallsign, aprsMessage, msgId, addressee) {
+    //console.log(`[APRS Auth DEBUG] Starting authentication for ${senderCallsign}`);
+    //console.log(`[APRS Auth DEBUG] Auth code: ${authCode}`);
+    //console.log(`[APRS Auth DEBUG] Message: ${aprsMessage}`);
+    //console.log(`[APRS Auth DEBUG] Msg ID: ${msgId}`);
+    //console.log(`[APRS Auth DEBUG] Addressee: "${addressee}"`);
+    
+    // Normalize sender callsign
+    let upperSender = senderCallsign.toUpperCase();
+    if (!upperSender.includes('-')) {
+        upperSender = `${upperSender}-0`;
+    }
+    //console.log(`[APRS Auth DEBUG] Normalized sender: ${upperSender}`);
+    
+    // Check if we have authentication info for this station
+    const authEntry = stationAuthTable.get(upperSender);
+    if (!authEntry) {
+        //console.log(`[APRS Auth DEBUG] No auth entry found for ${upperSender}`);
+        return false; // No authentication entry for this station
+    }
+    //console.log(`[APRS Auth DEBUG] Found auth entry for ${upperSender}`);
+    
+    // Get the shared secret (password) from config
+    // We need to find the original password, not the hash
+    let sharedSecret = null;
+    if (config.AUTH && Array.isArray(config.AUTH)) {
+        for (const authEntryConfig of config.AUTH) {
+            const commaIndex = authEntryConfig.indexOf(',');
+            if (commaIndex === -1) continue;
+            
+            let configCallsign = authEntryConfig.substring(0, commaIndex).trim().toUpperCase();
+            if (!configCallsign.includes('-')) {
+                configCallsign = `${configCallsign}-0`;
+            }
+            
+            if (configCallsign === upperSender) {
+                sharedSecret = authEntryConfig.substring(commaIndex + 1);
+                break;
+            }
+        }
+    }
+    
+    if (!sharedSecret) {
+        //console.log(`[APRS Auth DEBUG] Could not find shared secret for ${upperSender}`);
+        return false; // Could not find shared secret
+    }
+    //console.log(`[APRS Auth DEBUG] Found shared secret: ${sharedSecret}`);
+    
+    // Compute SHA256 hash of the shared secret (SecretKey)
+    const secretKey = crypto.createHash('sha256').update(sharedSecret, 'utf8').digest();
+    //console.log(`[APRS Auth DEBUG] Secret key (hex): ${secretKey.toString('hex')}`);
+    
+    // Get current time in minutes since January 1, 1970 UTC
+    const currentMinutes = Math.floor(Date.now() / (1000 * 60));
+    //console.log(`[APRS Auth DEBUG] Current minutes: ${currentMinutes}`);
+    
+    // Use the addressee from the APRS message and trim to match C# implementation
+    const destinationStation = addressee.trim();
+    //console.log(`[APRS Auth DEBUG] Destination station (from addressee): "${destinationStation}"`);
+
+    // Try authentication with 4 minute window (current, 3 previous, 1 future)
+    const minutesToTry = [
+        currentMinutes,     // current minute
+        currentMinutes - 1, // 1 minute ago
+        currentMinutes - 2, // 2 minutes ago
+        currentMinutes - 3, // 3 minutes ago
+        currentMinutes + 1  // 1 minute future
+    ];
+    
+    for (const minutesUtc of minutesToTry) {
+        // Build hash message according to spec
+        let hashMessage;
+        if (msgId) {
+            // For messages with message ID
+            hashMessage = `${minutesUtc}:${upperSender}:${destinationStation}:${aprsMessage}{${msgId}`;
+        } else {
+            // For messages without message ID
+            hashMessage = `${minutesUtc}:${upperSender}:${destinationStation}:${aprsMessage}`;
+        }
+        
+        //console.log(`[APRS Auth DEBUG] Hash message for minute ${minutesUtc}: ${hashMessage}`);
+        
+        const hmac = crypto.createHmac('sha256', secretKey);
+        hmac.update(Buffer.from(hashMessage, 'utf8'));
+        const computedToken = hmac.digest('base64').substring(0, 6);
+        
+        console.log(`[APRS Auth DEBUG] Computed token for minute ${minutesUtc}: ${computedToken}`);
+        
+        // Compare with provided auth code
+        if (computedToken === authCode) {
+            console.log(`[APRS Auth] Authentication successful for ${senderCallsign} using minute ${minutesUtc}`);
+            return true;
+        }
+    }
+    
+    console.log(`[APRS Auth] Authentication failed for ${senderCallsign} - no matching token found`);
+    return false;
 }
 
 // === Background server mode ===
@@ -302,11 +501,27 @@ radio.on('data', (frame) => {
                                 `${config.MQTT_TOPIC}/aprs_message` : 
                                 `${config.MQTT_TOPIC}/aprs_message_other`;
                             
+                            // Check authentication for MQTT publishing if authCode is present
+                            let authStatus = 'NONE';
+                            if (aprsPacket.messageData.authCode) {
+                                const isAuthenticated = verifyAprsAuthentication(
+                                    aprsPacket.messageData.authCode,
+                                    senderCallsign,
+                                    aprsPacket.messageData.msgText,
+                                    seqId,
+                                    aprsPacket.messageData.addressee
+                                );
+                                authStatus = isAuthenticated ? 'SUCCESS' : 'FAILED';
+                            } else if (requiresAuthentication(senderCallsign)) {
+                                authStatus = 'REQUIRED_BUT_MISSING';
+                            }
+
                             const messageData = {
                                 message: formattedMessage,
                                 sender: senderCallsign,
                                 addressee: addressee,
                                 text: messageText,
+                                authStatus: authStatus,
                                 timestamp: new Date().toISOString()
                             };
                             
@@ -335,10 +550,28 @@ radio.on('data', (frame) => {
                             // Check if this is a duplicate message
                             const isDuplicate = isAprsMessageDuplicate(senderCallsign, seqId);
                             
+                            // Check authentication if authCode is present
+                            let authenticationResult = null;
+                            if (aprsPacket.messageData.authCode) {
+                                const isAuthenticated = verifyAprsAuthentication(
+                                    aprsPacket.messageData.authCode,
+                                    senderCallsign,
+                                    aprsPacket.messageData.msgText,
+                                    seqId,
+                                    aprsPacket.messageData.addressee
+                                );
+                                authenticationResult = isAuthenticated ? 'SUCCESS' : 'FAILED';
+                                console.log(`[APRS Auth] Authentication ${authenticationResult} for message from ${senderCallsign} with auth code ${aprsPacket.messageData.authCode}`);
+                            } else if (requiresAuthentication(senderCallsign)) {
+                                authenticationResult = 'REQUIRED_BUT_MISSING';
+                                console.log(`[APRS Auth] Authentication REQUIRED but MISSING for message from ${senderCallsign}`);
+                            }
+                            
                             if (isDuplicate) {
                                 console.log(`[APRS] Duplicate message from ${senderCallsign} sequence ${seqId} - sending ACK but not processing further`);
                             } else {
-                                console.log(`[APRS] Message addressed to our station! Sending ACK for sequence ${seqId}`);
+                                const authMsg = authenticationResult ? ` (Auth: ${authenticationResult})` : '';
+                                console.log(`[APRS] Message addressed to our station! Sending ACK for sequence ${seqId}${authMsg}`);
                             }
                             
                             // Always send ACK, even for duplicates (in case original ACK was lost)
