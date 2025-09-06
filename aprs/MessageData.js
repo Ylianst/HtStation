@@ -16,6 +16,7 @@ class MessageData {
         this.msgType = MessageType.Unknown;
         this.seqId = '';
         this.msgText = '';
+        this.authCode = '';
     }
 
     clear() {
@@ -23,6 +24,7 @@ class MessageData {
         this.msgType = MessageType.Unknown;
         this.seqId = '';
         this.msgText = '';
+        this.authCode = '';
     }
 }
 

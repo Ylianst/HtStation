@@ -60,6 +60,9 @@ if (mqttEnabled) {
 // To disable channel info loading, set loadChannels to false
 const radio = new Radio(RADIO_MAC_ADDRESS, { loadChannels: true });
 
+// Set the callsign for transmission safety
+radio.setCallsign(RADIO_CALLSIGN);
+
 // Shared state for MQTT publishing
 let lastChannelInfo = null;
 let lastChannels = null;
@@ -258,8 +261,9 @@ radio.on('data', (frame) => {
                 const aprsPacket = AprsPacket.parse(aprsInput);
                 
                 if (aprsPacket) {
-                    //console.log('[APRS] Successfully decoded APRS packet:');
-                    //console.log(aprsPacket.toString());
+                    console.log('[APRS] Successfully decoded APRS packet:');
+                    console.log(aprsPacket.toString());
+                    //console.log(aprsPacket);
                     
                     // Publish APRS messages to Home Assistant sensor
                     if (aprsPacket.dataType === 'Message' && aprsPacket.messageData && mqttReporter && config.MQTT_TOPIC) {

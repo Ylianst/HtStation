@@ -141,6 +141,43 @@ const RadioPowerStatus = {
 
 class Radio extends EventEmitter {
     /**
+     * Check if transmission is allowed based on callsign configuration
+     * @returns {boolean} True if transmission is allowed, false otherwise
+     */
+    get TransmitAllowed() {
+        return this._transmitAllowed;
+    }
+
+    /**
+     * Set the callsign for transmission validation
+     * @param {string} callsign - The station callsign from configuration
+     */
+    setCallsign(callsign) {
+        this._callsign = callsign;
+        // Update transmit allowed status based on callsign validity
+        this._transmitAllowed = this._validateCallsign(callsign);
+        if (!this._transmitAllowed) {
+            console.warn('[Radio] TRANSMISSION DISABLED: No valid callsign configured');
+        } else {
+            console.log(`[Radio] Transmission enabled for callsign: ${callsign}`);
+        }
+    }
+
+    /**
+     * Validate if a callsign is valid for transmission
+     * @param {string} callsign - The callsign to validate
+     * @returns {boolean} True if callsign is valid, false otherwise
+     * @private
+     */
+    _validateCallsign(callsign) {
+        // Check if callsign exists and is not empty/whitespace
+        if (!callsign || typeof callsign !== 'string' || callsign.trim().length === 0) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
      * Request battery status (internal helper)
      * @param {number} powerStatus - 1: level, 2: voltage, 3: RC level, 4: percentage
      */
@@ -242,6 +279,12 @@ class Radio extends EventEmitter {
      * @param {object} opts - { channel_id, data }
      */
     sendTncFrame(opts) {
+        // Check if transmission is allowed
+        if (!this.TransmitAllowed) {
+            console.error('[Radio] sendTncFrame: TRANSMISSION BLOCKED - No valid callsign configured');
+            return;
+        }
+        
         // Print the full frame data in HEX before fragmenting
         const data = Buffer.isBuffer(opts.data) ? opts.data : Buffer.from(opts.data);
         //console.log(`[Radio] sendTncFrame() full data: ${bytesToHex(data)}`);
@@ -301,6 +344,10 @@ class Radio extends EventEmitter {
         this.loadChannels = options.loadChannels !== undefined ? options.loadChannels : true;
         this._tncFrameAccumulator = null;
         this._tncExpectedFragmentId = 0;
+        
+        // Transmission safety - default to disabled until callsign is set
+        this._transmitAllowed = false;
+        this._callsign = null;
         
         // GPS state management
         this.gpsEnabled = false;

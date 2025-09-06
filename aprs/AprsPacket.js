@@ -23,7 +23,6 @@ class AprsPacket {
         this.symbolCode = '\x00';
         this.fromD7 = false;
         this.fromD700 = false;
-        this.authCode = '';
         this.position = new Position();
         this.timeStamp = null;
         this.messageData = new MessageData();
@@ -71,20 +70,6 @@ class AprsPacket {
                 packet.informationField = dataStr;
             } else {
                 packet.informationField = dataStr.substring(1);
-            }
-
-            // Parse auth code
-            if (packet.informationField.length > 0) {
-                const lastBrace = packet.informationField.lastIndexOf('}');
-                if (lastBrace >= 0 && lastBrace === packet.informationField.length - 7) {
-                    packet.authCode = packet.informationField.substring(lastBrace + 1, lastBrace + 7);
-                    packet.informationField = packet.informationField.substring(0, lastBrace);
-                } else if (lastBrace >= 0 && lastBrace < packet.informationField.length - 7 && 
-                          packet.informationField[lastBrace + 7] === '{') {
-                    packet.authCode = packet.informationField.substring(lastBrace + 1, lastBrace + 7);
-                    packet.informationField = packet.informationField.substring(0, lastBrace) + 
-                                            packet.informationField.substring(lastBrace + 7);
-                }
             }
 
             // Parse information field based on data type
@@ -330,7 +315,7 @@ class AprsPacket {
             if (msgContent.toUpperCase().startsWith('ACK')) {
                 const lastBrace = msgContent.lastIndexOf('}');
                 if (lastBrace >= 0) {
-                    this.authCode = msgContent.substring(lastBrace + 1);
+                    this.messageData.authCode = msgContent.substring(lastBrace + 1);
                     msgContent = msgContent.substring(0, lastBrace - 1);
                 }
                 this.messageData.msgType = MessageType.Ack;
@@ -341,7 +326,7 @@ class AprsPacket {
             if (msgContent.toUpperCase().startsWith('REJ')) {
                 const lastBrace = msgContent.lastIndexOf('}');
                 if (lastBrace >= 0) {
-                    this.authCode = msgContent.substring(lastBrace + 1);
+                    this.messageData.authCode = msgContent.substring(lastBrace + 1);
                     msgContent = msgContent.substring(0, lastBrace - 1);
                 }
                 this.messageData.msgType = MessageType.Reject;
@@ -360,6 +345,12 @@ class AprsPacket {
             this.messageData.msgText = msgContent;
         }
         this.messageData.msgType = MessageType.Message;
+
+        const lastBrace2 = this.messageData.msgText.lastIndexOf('}');
+        if (lastBrace2 >= 0) {
+            this.messageData.authCode = this.messageData.msgText.substring(lastBrace2 + 1);
+            this.messageData.msgText = this.messageData.msgText.substring(0, lastBrace2 - 1);
+        }
     }
 
     /**
@@ -472,6 +463,9 @@ class AprsPacket {
             }
             if (this.messageData.seqId) {
                 lines.push(`  Sequence ID        : ${this.messageData.seqId}`);
+            }
+            if (this.messageData.authCode) {
+                lines.push(`  Auth Code          : ${this.messageData.authCode}`);
             }
         }
         
