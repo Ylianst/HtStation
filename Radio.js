@@ -325,6 +325,39 @@ class Radio extends EventEmitter {
         if (!this.IsTncFree()) return;
         this._tncSending = true;
         const packet = this._tncOutboundQueue.shift();
+        
+        /*
+        // Extract channel information from packet
+        const flags = packet[0];
+        const with_channel_id = (flags & 0x40) !== 0;
+        let channelInfo = 'Unknown';
+        
+        if (with_channel_id && packet.length > 1) {
+            const channel_id = packet[packet.length - 1]; // Channel ID is last byte
+            channelInfo = `${channel_id}`;
+            
+            // Add channel name if available
+            if (this.loadChannels && this.channels && this.channels[channel_id] && this.channels[channel_id].name_str) {
+                channelInfo += ` (${this.channels[channel_id].name_str})`;
+            }
+        } else if (this.htStatus && typeof this.htStatus.curr_ch_id === 'number') {
+            // Fall back to current channel from HT status
+            const channel_id = this.htStatus.curr_ch_id;
+            channelInfo = `${channel_id}`;
+            
+            if (channel_id >= 254) {
+                channelInfo += ' (NOAA)';
+            } else if (this.loadChannels && this.channels && this.channels.length > channel_id && this.channels[channel_id] && this.channels[channel_id].name_str) {
+                channelInfo += ` (${this.channels[channel_id].name_str})`;
+            }
+        }
+        */
+       
+        // Debug: Print the packet being sent in HEX and channel information
+        //console.log(`[Radio] _processTncQueue sending packet (HEX): ${Array.from(packet).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' ')}`);
+        //console.log(`[Radio] _processTncQueue sending packet (length): ${packet.length} bytes`);
+        //console.log(`[Radio] _processTncQueue sending packet (channel): ${channelInfo}`);
+        
         this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.HT_SEND_DATA, packet);
         this._tncSending = false;
         // If more packets, try to send next
@@ -355,6 +388,12 @@ class Radio extends EventEmitter {
         this.position = null;
         this.lastGpsUpdate = null; // Track when we last received a GPS position
         this.gpsLockTimer = null; // Timer to check GPS lock timeout
+        
+        // Auto-reconnection management
+        this._reconnectTimer = null;
+        this._reconnectInterval = 15000; // 15 seconds
+        this._autoReconnectEnabled = false;
+        this._isManualDisconnect = false;
     }
     /**
      * Updates the internal state of the radio.
@@ -455,6 +494,11 @@ class Radio extends EventEmitter {
         if (this.gpsLockTimer) {
             clearInterval(this.gpsLockTimer);
             this.gpsLockTimer = null;
+        }
+        
+        // Start auto-reconnection if enabled and not a manual disconnect
+        if (this._autoReconnectEnabled && !this._isManualDisconnect) {
+            this._scheduleReconnect();
         }
     }
 
@@ -924,6 +968,97 @@ class Radio extends EventEmitter {
         const seconds = (minutesDecimal - minutes) * 60;
 
         return `${degrees}° ${minutes}' ${seconds.toFixed(2)}" ${direction}`;
+    }
+
+    /**
+     * Enable or disable automatic reconnection
+     * @param {boolean} enabled - True to enable auto-reconnection, false to disable
+     */
+    setAutoReconnectEnabled(enabled) {
+        this._autoReconnectEnabled = enabled;
+        console.log(`[Radio] Auto-reconnection ${enabled ? 'enabled' : 'disabled'}`);
+        
+        // If disabling and there's a pending reconnect, cancel it
+        if (!enabled && this._reconnectTimer) {
+            clearTimeout(this._reconnectTimer);
+            this._reconnectTimer = null;
+        }
+    }
+
+    /**
+     * Schedule a reconnection attempt
+     * @private
+     */
+    _scheduleReconnect() {
+        // Clear any existing timer
+        if (this._reconnectTimer) {
+            clearTimeout(this._reconnectTimer);
+        }
+        
+        console.log(`[Radio] Scheduling reconnection attempt in ${this._reconnectInterval / 1000} seconds...`);
+        
+        this._reconnectTimer = setTimeout(() => {
+            this._attemptReconnect();
+        }, this._reconnectInterval);
+    }
+
+    /**
+     * Attempt to reconnect to the radio
+     * @private
+     */
+    async _attemptReconnect() {
+        // Clear the timer since we're processing the reconnect now
+        this._reconnectTimer = null;
+        
+        // Only attempt reconnect if auto-reconnection is still enabled
+        if (!this._autoReconnectEnabled) {
+            return;
+        }
+        
+        // Don't attempt reconnect if already connected or connecting
+        if (this.state === RadioState.CONNECTED || this.state === RadioState.CONNECTING) {
+            return;
+        }
+        
+        console.log('[Radio] Attempting automatic reconnection...');
+        
+        try {
+            await this.connect(this.macAddress);
+            console.log('[Radio] Automatic reconnection successful!');
+            
+            // Clear the manual disconnect flag since we successfully reconnected
+            this._isManualDisconnect = false;
+            
+        } catch (error) {
+            console.log(`[Radio] Automatic reconnection failed: ${error.message}`);
+            
+            // Schedule another reconnection attempt if auto-reconnect is still enabled
+            if (this._autoReconnectEnabled) {
+                this._scheduleReconnect();
+            }
+        }
+    }
+
+    /**
+     * Disconnect from the radio manually (disables auto-reconnection temporarily)
+     */
+    disconnect() {
+        console.log('[Radio] Manual disconnect requested');
+        this._isManualDisconnect = true;
+        
+        // Clear any pending reconnection timer
+        if (this._reconnectTimer) {
+            clearTimeout(this._reconnectTimer);
+            this._reconnectTimer = null;
+        }
+        
+        // Disconnect the underlying client if connected
+        if (this.gaiaClient && this.state === RadioState.CONNECTED) {
+            this.gaiaClient.disconnect();
+        } else {
+            // If not connected, just update state
+            this.updateState(RadioState.DISCONNECTED);
+        }
     }
 }
 

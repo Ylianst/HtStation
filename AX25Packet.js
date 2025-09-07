@@ -180,11 +180,19 @@ class AX25Packet {
         let i = 0;
         for (let j = 0; j < this.addresses.length; j++) {
             let a = this.addresses[j];
+            if (!a) {
+                console.error(`[AX25Packet] Address at index ${j} is null`);
+                return null;
+            }
             a.CRBit1 = false;
             a.CRBit2 = a.CRBit3 = true;
             if (j === 0) { a.CRBit1 = !!this.command; }
             if (j === 1) { a.CRBit1 = !this.command; a.CRBit2 = modulo128 ? false : true; }
             let ab = a.toByteArray(j === (this.addresses.length - 1));
+            if (!ab) {
+                console.error(`[AX25Packet] Failed to serialize address at index ${j}: ${a.toString()}`);
+                return null;
+            }
             // ab is Uint8Array, convert to Buffer for copy
             Buffer.from(ab).copy(rdata, i, 0, 7);
             i += 7;
