@@ -51,7 +51,8 @@ class AX25Session extends EventEmitter {
             sentSREJ: false,
             gotREJSequenceNum: -1,
             gotSREJSequenceNum: -1,
-            sendBuffer: []
+            sendBuffer: [],
+            receiveBuffer: new Map() // Buffer for out-of-order packets
         };
         
         // Timers
@@ -124,6 +125,7 @@ class AX25Session extends EventEmitter {
             this._onStateChangedEvent(state);
             if (state === AX25Session.ConnectionState.DISCONNECTED) {
                 this._state.sendBuffer = [];
+                this._clearReceiveBuffer();
                 this.addresses = null;
                 this.sessionState.clear();
                 // Clear session channel ID when disconnecting
@@ -399,6 +401,62 @@ class AX25Session extends EventEmitter {
         }
     }
     
+    // Out-of-order packet management
+    _storeOutOfOrderPacket(packet) {
+        const sequenceNumber = packet.ns;
+        this._trace(`Storing out-of-order packet with sequence ${sequenceNumber}`);
+        this._state.receiveBuffer.set(sequenceNumber, {
+            packet: packet,
+            timestamp: Date.now()
+        });
+        
+        // Clean up old packets (older than 30 seconds) to prevent memory leaks
+        const now = Date.now();
+        const timeout = 30000; // 30 seconds
+        for (const [seq, entry] of this._state.receiveBuffer.entries()) {
+            if (now - entry.timestamp > timeout) {
+                this._trace(`Removing expired out-of-order packet with sequence ${seq}`);
+                this._state.receiveBuffer.delete(seq);
+            }
+        }
+    }
+    
+    _processBufferedPackets() {
+        let packetsProcessed = 0;
+        let expectedSeq = this._state.receiveSequence;
+        const modulus = this.modulo128 ? 128 : 8;
+        
+        // Keep processing buffered packets in order until we hit a gap
+        while (this._state.receiveBuffer.has(expectedSeq)) {
+            const entry = this._state.receiveBuffer.get(expectedSeq);
+            const packet = entry.packet;
+            
+            this._trace(`Processing buffered packet with sequence ${expectedSeq}`);
+            
+            // Deliver the packet data
+            if (packet.data && packet.data.length > 0) {
+                this._onDataReceivedEvent(packet.data);
+            }
+            
+            // Remove from buffer and advance sequence
+            this._state.receiveBuffer.delete(expectedSeq);
+            this._state.receiveSequence = (this._state.receiveSequence + 1) % modulus;
+            expectedSeq = (expectedSeq + 1) % modulus;
+            packetsProcessed++;
+        }
+        
+        if (packetsProcessed > 0) {
+            this._trace(`Processed ${packetsProcessed} buffered packets, new receive sequence: ${this._state.receiveSequence}`);
+        }
+        
+        return packetsProcessed;
+    }
+    
+    _clearReceiveBuffer() {
+        this._trace('Clearing receive buffer');
+        this._state.receiveBuffer.clear();
+    }
+    
     // Public methods
     connect(addresses) {
         this._trace('Connect');
@@ -656,6 +714,7 @@ class AX25Session extends EventEmitter {
                 this._state.gotREJSequenceNum = -1;
                 this._state.remoteBusy = false;
                 this._state.sendBuffer = [];
+                this._clearReceiveBuffer();
                 
                 this._clearTimer('connect');
                 this._clearTimer('disconnect');
@@ -841,22 +900,51 @@ class AX25Session extends EventEmitter {
                 
             case AX25Packet.FrameType.I_FRAME:
                 if (this._state.connection === AX25Session.ConnectionState.CONNECTED) {
+                    this._trace(`Received I-frame with sequence ${packet.ns}, expecting ${this._state.receiveSequence}`);
+                    
                     if (packet.pollFinal) {
                         response.pollFinal = true;
                     }
+                    
                     if (packet.ns === this._state.receiveSequence) {
+                        // Expected packet - process it and any buffered packets
                         this._state.sentREJ = false;
                         this._state.receiveSequence = (this._state.receiveSequence + 1) % (this.modulo128 ? 128 : 8);
+                        
                         if (packet.data && packet.data.length > 0) {
                             this._onDataReceivedEvent(packet.data);
                         }
+                        
+                        // Process any buffered packets that are now in order
+                        const bufferedProcessed = this._processBufferedPackets();
+                        if (bufferedProcessed > 0) {
+                            this._trace(`After processing expected packet, delivered ${bufferedProcessed} additional buffered packets`);
+                        }
+                        
                         response = null;
-                    } else if (this._state.sentREJ) {
-                        response = null;
-                    } else if (!this._state.sentREJ) {
-                        response.type = AX25Packet.FrameType.S_FRAME_REJ;
-                        this._state.sentREJ = true;
+                    } else {
+                        // Out-of-order packet
+                        const modulus = this.modulo128 ? 128 : 8;
+                        const distance = this._distanceBetween(packet.ns, this._state.receiveSequence, modulus);
+                        
+                        if (distance <= this.maxFrames && distance > 0) {
+                            // Packet is ahead but within window - buffer it
+                            this._trace(`Buffering out-of-order packet sequence ${packet.ns} (ahead by ${distance})`);
+                            this._storeOutOfOrderPacket(packet);
+                            
+                            // Don't send REJ if we're buffering packets
+                            response = null;
+                        } else if (this._state.sentREJ) {
+                            // REJ already sent for this gap
+                            response = null;
+                        } else {
+                            // Gap is too large or packet is behind - send REJ
+                            this._trace(`Sending REJ for sequence ${this._state.receiveSequence} (received ${packet.ns})`);
+                            response.type = AX25Packet.FrameType.S_FRAME_REJ;
+                            this._state.sentREJ = true;
+                        }
                     }
+                    
                     this._receiveAcknowledgement(packet);
                     
                     if (!response || !response.pollFinal) {

@@ -11,6 +11,6 @@
   },
   "dependencies": {
     "bluetooth-serial-port": "^3.0.2",
-    "mqtt": "^5.14.0"
+    "mqtt": "^5.14.1"
   }
 }
