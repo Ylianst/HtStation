@@ -1,4 +1,4 @@
-# Handi-Talky Commander Station
+# Handi-Talky Station
 
 This is a Amateur Radio (HAM Radio) tool for the UV-Pro, GA-5WB, VR-N76, VR-N7500, VR-N7600 radios.
 
@@ -23,4 +23,5 @@ The following radios should work with this application:
 ### Credits
 
 This tool is based on the decoding work done by Kyle Husmann, KC3SLD and this [BenLink](https://github.com/khusmann/benlink) project which decoded the Bluetooth commands for these radios.
+
 
