@@ -219,7 +219,12 @@ class AX25Session extends EventEmitter {
     
     // Timer management
     _setTimer(timerName) {
-        this._clearTimer(timerName);
+        // Only clear the timer handle, not the attempts counter for ongoing timers
+        if (this._timers[timerName]) {
+            clearTimeout(this._timers[timerName]);
+            this._timers[timerName] = null;
+        }
+        
         if (!this.addresses) return;
         
         const timeout = this._getTimerTimeout(timerName);
@@ -237,6 +242,7 @@ class AX25Session extends EventEmitter {
             this._timers[timerName] = null;
         }
         
+        // Reset attempt counters when explicitly clearing timers
         switch (timerName) {
             case 'connect':
                 this._timers.connectAttempts = 0;
@@ -321,14 +327,28 @@ class AX25Session extends EventEmitter {
     }
     
     _onT3TimerExpired() {
-        this._trace('** Timer - T3 expired');
-        if (this._timers.t1) return; // Don't interfere if T1 is active
+        this._trace('** Timer - T3 expired (idle timeout)');
+        if (this._timers.t1) {
+            this._trace('T3 timer expired but T1 is active, restarting T3');
+            this._setTimer('t3'); // Restart T3 if T1 is active
+            return;
+        }
+        
         if (this._timers.t3Attempts >= this.retries) {
+            this._trace('T3 exceeded retry limit - disconnecting idle session');
             this._clearTimer('t3');
             this.disconnect();
             return;
         }
+        
+        this._trace(`T3 idle check ${this._timers.t3Attempts + 1}/${this.retries + 1}`);
         this._timers.t3Attempts++;
+        
+        // Send RR with poll bit to check if remote is still alive
+        if (this._state.connection === AX25Session.ConnectionState.CONNECTED) {
+            this._sendRR(true); // Poll the remote station
+            this._setTimer('t3'); // Restart T3 timer
+        }
     }
     
     // Utility methods
@@ -797,6 +817,8 @@ class AX25Session extends EventEmitter {
                 this._renumber();
                 response.type = AX25Packet.FrameType.U_FRAME_UA;
                 newState = AX25Session.ConnectionState.CONNECTED;
+                // Start T3 idle timer when connection is established
+                this._setTimer('t3');
                 break;
                 
             case AX25Packet.FrameType.U_FRAME_DISC:
@@ -828,7 +850,7 @@ class AX25Session extends EventEmitter {
                 if (this._state.connection === AX25Session.ConnectionState.CONNECTING) {
                     this._clearTimer('connect');
                     this._clearTimer('t2');
-                    this._setTimer('t3');
+                    this._setTimer('t3'); // Start idle timer when connected
                     response = null;
                     newState = AX25Session.ConnectionState.CONNECTED;
                 } else if (this._state.connection === AX25Session.ConnectionState.DISCONNECTING) {
@@ -838,6 +860,8 @@ class AX25Session extends EventEmitter {
                     response = null;
                     newState = AX25Session.ConnectionState.DISCONNECTED;
                 } else if (this._state.connection === AX25Session.ConnectionState.CONNECTED) {
+                    // Restart T3 timer when receiving valid packets from remote
+                    this._setTimer('t3');
                     response = null;
                 } else {
                     response.type = AX25Packet.FrameType.U_FRAME_DM;
@@ -926,6 +950,8 @@ class AX25Session extends EventEmitter {
                     }
                     this._receiveAcknowledgement(packet);
                     this._setTimer('t2');
+                    // Restart T3 timer when receiving valid packets from remote
+                    this._setTimer('t3');
                 } else if (packet.command) {
                     response.type = AX25Packet.FrameType.U_FRAME_DM;
                     response.pollFinal = true;
@@ -944,6 +970,8 @@ class AX25Session extends EventEmitter {
                     }
                     this._clearTimer('t2');
                     this._setTimer('t1');
+                    // Restart T3 timer when receiving valid packets from remote
+                    this._setTimer('t3');
                 } else if (packet.command) {
                     response.type = AX25Packet.FrameType.U_FRAME_DM;
                     response.pollFinal = true;
@@ -962,6 +990,8 @@ class AX25Session extends EventEmitter {
                     this._receiveAcknowledgement(packet);
                     this._state.gotREJSequenceNum = packet.nr;
                     this._setTimer('t2');
+                    // Restart T3 timer when receiving valid packets from remote
+                    this._setTimer('t3');
                 } else {
                     response.type = AX25Packet.FrameType.U_FRAME_DM;
                     response.pollFinal = true;
@@ -976,10 +1006,15 @@ class AX25Session extends EventEmitter {
                         response.pollFinal = true;
                     }
                     
+                    let dataQueuedForSending = false;
+                    
                     if (packet.ns === this._state.receiveSequence) {
                         // Expected packet - process it and any buffered packets
                         this._state.sentREJ = false;
                         this._state.receiveSequence = (this._state.receiveSequence + 1) % (this.modulo128 ? 128 : 8);
+                        
+                        // Track send buffer length before processing data
+                        const sendBufferLengthBefore = this._state.sendBuffer.length;
                         
                         if (packet.data && packet.data.length > 0) {
                             this._onDataReceivedEvent(packet.data);
@@ -990,6 +1025,9 @@ class AX25Session extends EventEmitter {
                         if (bufferedProcessed > 0) {
                             this._trace(`After processing expected packet, delivered ${bufferedProcessed} additional buffered packets`);
                         }
+                        
+                        // Check if data was queued for sending during processing
+                        dataQueuedForSending = this._state.sendBuffer.length > sendBufferLengthBefore;
                         
                         response = null;
                     } else {
@@ -1017,8 +1055,27 @@ class AX25Session extends EventEmitter {
                     
                     this._receiveAcknowledgement(packet);
                     
+                    // Restart T3 timer when receiving valid I-frames from remote
+                    this._setTimer('t3');
+                    
                     if (!response || !response.pollFinal) {
                         response = null;
+                        
+                        // Optimization: Skip sending S-FRAME-RR if we have data to send
+                        // The outgoing I-FRAME will carry the piggyback acknowledgment
+                        // Check if this was an in-sequence packet we just processed
+                        const modulus = this.modulo128 ? 128 : 8;
+                        const expectedPrevSeq = (this._state.receiveSequence - 1 + modulus) % modulus;
+                        
+                        if (packet.ns === expectedPrevSeq && dataQueuedForSending && !packet.pollFinal) {
+                            this._trace('Optimization: Skipping S-FRAME-RR since data is queued for sending (piggyback ACK will be used)');
+                            // Clear any pending delayed ACK since we'll piggyback
+                            this._clearDelayedAck();
+                            // Still set T2 timer to ensure data gets sent promptly
+                            this._setTimer('t2');
+                            return true; // Skip sending RR, let drain handle the acknowledgment
+                        }
+                        
                         // Use delayed acknowledgment strategy but send immediate ACK if needed
                         if (this._shouldSendAck(packet)) {
                             this._sendRR(packet.pollFinal);
