@@ -40,6 +40,14 @@ class AX25Session extends EventEmitter {
         this.modulo128 = false;
         this.tracing = true;
         
+        // Performance optimization parameters
+        this.ackDelay = 200; // 200ms delay before sending RR
+        this.pendingAck = false;
+        this.ackTimer = null;
+        this.lastRRTime = null;
+        this.lastRRSequence = -1;
+        this.lastAckTime = Date.now();
+        
         // Connection state
         this._state = {
             connection: AX25Session.ConnectionState.DISCONNECTED,
@@ -170,9 +178,11 @@ class AX25Session extends EventEmitter {
         }
     }
     
-    // Timing calculations
+    // Timing calculations optimized for 1200 baud
     _getMaxPacketTime() {
-        return Math.floor((600 + (this.packetLength * 8)) / this.hBaud * 1000);
+        // More conservative timing for 1200 baud with header overhead
+        const headerOverhead = 20; // Account for AX.25 headers and TNC overhead
+        return Math.floor((headerOverhead + (this.packetLength * 8)) / this.hBaud * 1000 * 1.5);
     }
     
     _getTimeout() {
@@ -183,8 +193,12 @@ class AX25Session extends EventEmitter {
             }
         }
         const addressCount = this.addresses ? this.addresses.length : 2;
-        return (this._getMaxPacketTime() * Math.max(1, addressCount - 2) * 4) + 
-               (this._getMaxPacketTime() * Math.max(1, multiplier));
+        
+        // More conservative timeout calculation for 1200 baud
+        const baseTimeout = this._getMaxPacketTime() * Math.max(1, addressCount - 2) * 6; // Increased from 4
+        const backoff = this._getMaxPacketTime() * Math.max(1, multiplier) * 2; // More gradual backoff
+        
+        return baseTimeout + backoff;
     }
     
     _getTimerTimeout(timerName) {
@@ -194,7 +208,8 @@ class AX25Session extends EventEmitter {
             case 't1':
                 return this._getTimeout();
             case 't2':
-                return this._getMaxPacketTime() * 2;
+                // Longer T2 timeout to reduce premature RR transmissions
+                return this._getMaxPacketTime() * 3; // Increased from 2 to 3
             case 't3':
                 return this._getTimeout() * 7;
             default:
@@ -335,7 +350,18 @@ class AX25Session extends EventEmitter {
         this._state.remoteReceiveSequence = packet.nr;
     }
     
+    // Performance optimized RR sending with suppression
     _sendRR(pollFinal) {
+        // Suppress redundant RR frames
+        const now = Date.now();
+        if (!pollFinal && 
+            this.lastRRTime && 
+            (now - this.lastRRTime < this._getMaxPacketTime()) &&
+            this.lastRRSequence === this._state.receiveSequence) {
+            this._trace('Suppressing redundant RR frame');
+            return;
+        }
+        
         this._trace('SendRR');
         const packet = new AX25Packet(
             this.addresses,
@@ -347,6 +373,46 @@ class AX25Session extends EventEmitter {
         );
         packet.modulo128 = this.modulo128;
         this._emitPacket(packet);
+        
+        // Track last RR sent
+        this.lastRRTime = now;
+        this.lastRRSequence = this._state.receiveSequence;
+        this.lastAckTime = now;
+    }
+    
+    // Delayed acknowledgment strategy
+    _setDelayedAck() {
+        if (this.ackTimer) {
+            clearTimeout(this.ackTimer);
+        }
+        this.pendingAck = true;
+        this.ackTimer = setTimeout(() => {
+            if (this.pendingAck && this._state.connection === AX25Session.ConnectionState.CONNECTED) {
+                this._sendRR(false);
+                this.pendingAck = false;
+            }
+        }, this.ackDelay);
+    }
+    
+    // Clear pending acknowledgment
+    _clearDelayedAck() {
+        if (this.ackTimer) {
+            clearTimeout(this.ackTimer);
+            this.ackTimer = null;
+        }
+        this.pendingAck = false;
+    }
+    
+    // Check if we should send an acknowledgment
+    _shouldSendAck(packet) {
+        const now = Date.now();
+        // Send ACK immediately if:
+        // 1. Poll bit is set (mandatory)
+        // 2. Significant delay since last ACK (> 400ms)
+        // 3. This is the first packet received (no previous RR time)
+        return packet.pollFinal || 
+               !this.lastRRTime ||
+               (now - this.lastAckTime > this.ackDelay * 2);
     }
     
     _drain(resent = true) {
@@ -567,6 +633,9 @@ class AX25Session extends EventEmitter {
         this._trace('Send');
         if (!info || info.length === 0) return;
         
+        // Clear pending acknowledgment when sending data (piggyback ACK)
+        this._clearDelayedAck();
+        
         const packetLength = this.packetLength;
         for (let i = 0; i < info.length; i += packetLength) {
             const length = Math.min(packetLength, info.length - i);
@@ -619,9 +688,10 @@ class AX25Session extends EventEmitter {
         let newState = this.currentState;
         
         // Check if this is for the right station for this session
+        // Only check when we have an active session (addresses are set)
         if (this.addresses && 
             (packet.addresses[1].callSignWithId !== this.addresses[0].callSignWithId)) {
-            this._trace(`Got packet from wrong station: ${packet.addresses[1].callSignWithId}`);
+            this._trace(`Got packet from wrong station: ${packet.addresses[1].callSignWithId}, expected: ${this.addresses[0].callSignWithId}`);
             
             const fromAddr = AX25Address.getAddressFromString(packet.addresses[1].toString());
             const toAddr = AX25Address.getAddress(this.sessionCallsign, this.sessionStationId);
@@ -949,7 +1019,14 @@ class AX25Session extends EventEmitter {
                     
                     if (!response || !response.pollFinal) {
                         response = null;
-                        this._setTimer('t2');
+                        // Use delayed acknowledgment strategy but send immediate ACK if needed
+                        if (this._shouldSendAck(packet)) {
+                            this._sendRR(packet.pollFinal);
+                        } else {
+                            // For normal data frames, use delayed ACK but also set T2 timer as backup
+                            this._setDelayedAck();
+                            this._setTimer('t2');
+                        }
                     }
                 } else if (packet.command) {
                     response.type = AX25Packet.FrameType.U_FRAME_DM;
