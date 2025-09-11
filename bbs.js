@@ -3,14 +3,14 @@
 const AX25Session = require('./AX25Session');
 const AX25Packet = require('./AX25Packet');
 
-class EchoServer {
+class BbsServer {
     constructor(config, radio) {
         this.config = config;
         this.radio = radio;
         this.RADIO_CALLSIGN = config.CALLSIGN;
         this.RADIO_STATIONID = config.STATIONID;
         
-        // === AX25 Session Management for Echo Mode ===
+        // === AX25 Session Management for BBS Mode ===
         this.activeSessions = new Map(); // Map of session keys to session objects
     }
     
@@ -21,8 +21,8 @@ class EchoServer {
         return addresses[1].callSignWithId;
     }
     
-    // Helper function to create or get session for echo mode
-    getOrCreateEchoSession(packet) {
+    // Helper function to create or get session for BBS mode
+    getOrCreateBbsSession(packet) {
         if (!packet.addresses || packet.addresses.length < 2) return null;
         
         const sessionKey = this.getSessionKey(packet.addresses);
@@ -30,7 +30,7 @@ class EchoServer {
         
         let session = this.activeSessions.get(sessionKey);
         if (!session) {
-            console.log(`[Echo Session] Creating new session for ${sessionKey}`);
+            console.log(`[BBS Session] Creating new session for ${sessionKey}`);
             session = new AX25Session({ 
                 callsign: this.RADIO_CALLSIGN, 
                 RADIO_CALLSIGN: this.RADIO_CALLSIGN,
@@ -41,29 +41,34 @@ class EchoServer {
             
             // Set up session event handlers
             session.on('stateChanged', (state) => {
-                console.log(`[Echo Session] ${sessionKey} state changed to ${state}`);
-                if (state === AX25Session.ConnectionState.DISCONNECTED) {
-                    console.log(`[Echo Session] Removing disconnected session for ${sessionKey}`);
+                console.log(`[BBS Session] ${sessionKey} state changed to ${state}`);
+                if (state === AX25Session.ConnectionState.CONNECTED) {
+                    // Send welcome message when session is established
+                    const welcomeMessage = `Welcome to ${this.RADIO_CALLSIGN} BBS\r\nType 'H' for help.\r\n`;
+                    console.log(`[BBS Session] Sending welcome message to ${sessionKey}`);
+                    session.send(Buffer.from(welcomeMessage));
+                } else if (state === AX25Session.ConnectionState.DISCONNECTED) {
+                    console.log(`[BBS Session] Removing disconnected session for ${sessionKey}`);
                     this.activeSessions.delete(sessionKey);
                 }
             });
             
             session.on('dataReceived', (data) => {
-                console.log(`[Echo Session] ${sessionKey} received ${data.length} bytes: ${data.toString()}`);
-                // Echo the data back to the sender
+                console.log(`[BBS Session] ${sessionKey} received ${data.length} bytes: ${data.toString()}`);
+                // Echo the data back to the sender (BBS functionality can be expanded here)
                 if (session.currentState === AX25Session.ConnectionState.CONNECTED) {
-                    console.log(`[Echo Session] Echoing ${data.length} bytes back to ${sessionKey}`);
+                    console.log(`[BBS Session] Echoing ${data.length} bytes back to ${sessionKey}`);
                     session.send(data);
                 }
             });
             
             session.on('uiDataReceived', (data) => {
-                console.log(`[Echo Session] ${sessionKey} received UI data ${data.length} bytes: ${data.toString()}`);
+                console.log(`[BBS Session] ${sessionKey} received UI data ${data.length} bytes: ${data.toString()}`);
                 // For UI frames, we don't echo back as they're connectionless
             });
             
             session.on('error', (error) => {
-                console.log(`[Echo Session] ${sessionKey} error: ${error}`);
+                console.log(`[BBS Session] ${sessionKey} error: ${error}`);
             });
             
             this.activeSessions.set(sessionKey, session);
@@ -72,22 +77,22 @@ class EchoServer {
         return session;
     }
     
-    // Main method to process packets in echo mode
+    // Main method to process packets in BBS mode
     processPacket(packet) {
         // Check if first address matches our station
         const firstAddr = packet.addresses[0];
         if (firstAddr.address === this.RADIO_CALLSIGN && firstAddr.SSID == this.RADIO_STATIONID) {
-            // For echo mode, handle session management and U-frame echoing
+            // For BBS mode, handle session management and U-frame echoing
             
             // Check if this is a session-related packet (SABM, SABME, I-frame, etc.)
             if (packet.isSessionPacket()) {
                 // Handle session management
-                console.log('[Echo Session] Processing session packet');
-                const session = this.getOrCreateEchoSession(packet);
+                console.log('[BBS Session] Processing session packet');
+                const session = this.getOrCreateBbsSession(packet);
                 if (session) {
                     session.receive(packet);
                 } else {
-                    console.log('[Echo Session] Failed to create/get session for packet');
+                    console.log('[BBS Session] Failed to create/get session for packet');
                 }
             } else {
                 // Handle U-frame echoing for non-session packets
@@ -107,22 +112,22 @@ class EchoServer {
                         // Serialize replyPacket with header and addresses
                         const serialized = replyPacket.ToByteArray ? replyPacket.ToByteArray() : (replyPacket.toByteArray ? replyPacket.toByteArray() : null);
                         if (!serialized) {
-                            console.warn('[Echo Server] AX.25 packet serialization failed:', replyPacket);
+                            console.warn('[BBS Server] AX.25 packet serialization failed:', replyPacket);
                         } else if (typeof this.radio.sendTncFrame !== 'function') {
-                            console.warn('[Echo Server] radio.sendTncFrame not implemented.');
+                            console.warn('[BBS Server] radio.sendTncFrame not implemented.');
                         } else {
                             this.radio.sendTncFrame({
                                 channel_id: replyPacket.channel_id,
                                 data: serialized
                             });
-                            console.log('[Echo Server] Echoed AX.25 U-frame packet back to sender.');
+                            console.log('[BBS Server] Echoed AX.25 U-frame packet back to sender.');
                         }
                     }
                 } else {
                     if (!isUFrame) {
-                        console.log('[Echo Server] AX.25 packet addressed to our station - not echoing (not a U-frame)');
+                        console.log('[BBS Server] AX.25 packet addressed to our station - not echoing (not a U-frame)');
                     } else {
-                        console.log('[Echo Server] AX.25 packet addressed to our station - not echoing (no payload data)');
+                        console.log('[BBS Server] AX.25 packet addressed to our station - not echoing (no payload data)');
                     }
                 }
             }
@@ -130,4 +135,4 @@ class EchoServer {
     }
 }
 
-module.exports = EchoServer;
+module.exports = BbsServer;

@@ -93,12 +93,16 @@ const AX25Packet = require('./AX25Packet');
 const { AprsPacket } = require('./aprs');
 const AprsHandler = require('./aprs.js');
 const EchoServer = require('./echoserver.js');
+const BbsServer = require('./bbs.js');
 
 // Initialize APRS handler
 const aprsHandler = new AprsHandler(config, radio, mqttReporter);
 
 // Initialize Echo Server
 const echoServer = new EchoServer(config, radio);
+
+// Initialize BBS Server
+const bbsServer = new BbsServer(config, radio);
 
 radio.on('data', (frame) => {
     // Attempt to decode AX.25 packet
@@ -116,6 +120,12 @@ radio.on('data', (frame) => {
         // Handle echo server functionality
         if (config.SERVER && config.SERVER.toLowerCase() === 'echo') {
             echoServer.processPacket(packet);
+            return;
+        }
+        
+        // Handle BBS server functionality
+        if (config.SERVER && config.SERVER.toLowerCase() === 'bbs') {
+            bbsServer.processPacket(packet);
             return;
         }
     } else {

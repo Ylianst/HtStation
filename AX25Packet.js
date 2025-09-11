@@ -194,6 +194,24 @@ class AX25Packet {
         return `${pathString}:${payload}`;
     }
 
+    /**
+     * Check if this packet is a session-related packet (SABM, SABME, I-frame, etc.)
+     * @returns {boolean} True if this is a session packet, false otherwise
+     */
+    isSessionPacket() {
+        return (
+            this.type === AX25Packet.FrameType.U_FRAME_SABM ||
+            this.type === AX25Packet.FrameType.U_FRAME_SABME ||
+            this.type === AX25Packet.FrameType.U_FRAME_DISC ||
+            this.type === AX25Packet.FrameType.U_FRAME_UA ||
+            this.type === AX25Packet.FrameType.U_FRAME_DM ||
+            this.type === AX25Packet.FrameType.I_FRAME ||
+            this.type === AX25Packet.FrameType.S_FRAME_RR ||
+            this.type === AX25Packet.FrameType.S_FRAME_RNR ||
+            this.type === AX25Packet.FrameType.S_FRAME_REJ
+        );
+    }
+
     toByteArray() {
         if (!this.addresses || this.addresses.length < 1) return null;
         let dataBytes = null;
