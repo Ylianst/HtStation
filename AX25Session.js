@@ -761,9 +761,37 @@ class AX25Session extends EventEmitter {
             case AX25Packet.FrameType.U_FRAME_SABME:
                 this._trace(`Processing SABM/SABME, current state: ${this.currentState}`);
                 
+                // Check if this is a reconnection from the same station
                 if (this.currentState !== AX25Session.ConnectionState.DISCONNECTED) {
-                    this._trace(`Ignoring SABM - not in DISCONNECTED state (current: ${this.currentState})`);
-                    return false;
+                    // If we have an active session, check if it's from the same station
+                    if (this.addresses && packet.addresses && packet.addresses.length >= 2) {
+                        const incomingStation = packet.addresses[1].callSignWithId;
+                        const currentStation = this.addresses[0].callSignWithId;
+                        
+                        if (incomingStation === currentStation) {
+                            this._trace(`Same station (${incomingStation}) reconnecting - silently resetting session`);
+                            // Perform a silent disconnect - clear timers and reset state without triggering disconnection events
+                            this._clearTimer('connect');
+                            this._clearTimer('disconnect');
+                            this._clearTimer('t1');
+                            this._clearTimer('t2');
+                            this._clearTimer('t3');
+                            
+                            // Silent reset of connection state without triggering events or cleanup
+                            this._state.connection = AX25Session.ConnectionState.DISCONNECTED;
+                            this._state.sendBuffer = [];
+                            this._clearReceiveBuffer();
+                            // Don't clear addresses or sessionChannelId yet - let the new connection set them
+                            
+                            // Continue processing the SABM to establish new connection
+                        } else {
+                            this._trace(`Ignoring SABM from different station (${incomingStation}) - current session with ${currentStation}`);
+                            return false;
+                        }
+                    } else {
+                        this._trace(`Ignoring SABM - not in DISCONNECTED state (current: ${this.currentState})`);
+                        return false;
+                    }
                 }
                 
                 const fromAddr = AX25Address.getAddressFromString(packet.addresses[1].toString());
