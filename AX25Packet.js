@@ -153,6 +153,47 @@ class AX25Packet {
         return this.addresses.map(a => `[${a.toString()}]`).join('') + ': ' + this.data;
     }
 
+    /**
+     * Format an AX.25 packet into APRS-style string representation
+     * @returns {string} Formatted packet string (e.g., "SQ7PFS-10>APRS,TCPIP*,qAC,T2SYDNEY:payload")
+     */
+    formatAX25PacketString() {
+        if (!this.addresses || this.addresses.length < 2) {
+            return 'Invalid packet';
+        }
+
+        // Helper function to format a single address with SSID
+        const formatAddress = (addr) => {
+            if (!addr || !addr.address) return '';
+            if (addr.SSID && addr.SSID > 0) {
+                return `${addr.address}-${addr.SSID}`;
+            }
+            return addr.address;
+        };
+
+        // Source is addresses[1] (sender)
+        const source = formatAddress(this.addresses[1]);
+        
+        // Destination is addresses[0] 
+        const destination = formatAddress(this.addresses[0]);
+        
+        // Build the path string: source>destination[,repeaters...]
+        let pathString = `${source}>${destination}`;
+        
+        // Add any additional addresses (repeaters/digipeaters) starting from index 2
+        if (this.addresses.length > 2) {
+            const repeaters = this.addresses.slice(2).map(formatAddress).filter(addr => addr.length > 0);
+            if (repeaters.length > 0) {
+                pathString += ',' + repeaters.join(',');
+            }
+        }
+        
+        // Add the payload (dataStr or data)
+        const payload = this.dataStr || (this.data ? this.data.toString() : '');
+        
+        return `${pathString}:${payload}`;
+    }
+
     toByteArray() {
         if (!this.addresses || this.addresses.length < 1) return null;
         let dataBytes = null;
