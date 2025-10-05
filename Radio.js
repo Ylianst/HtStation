@@ -273,6 +273,7 @@ class Radio extends EventEmitter {
      */
     _tncOutboundQueue = [];
     _tncSending = false;
+    _tncPendingPacket = null; // Packet currently being transmitted (not yet confirmed)
 
     /**
      * Send a TNC frame (AX.25 packet) over Bluetooth, fragmenting as needed.
@@ -321,19 +322,21 @@ class Radio extends EventEmitter {
      * Process outbound TNC queue, send next packet if radio is free
      */
     _processTncQueue() {
-        if (this._tncSending || this._tncOutboundQueue.length === 0) return;
+        // Don't send if already sending, pending confirmation, queue empty, or radio busy
+        if (this._tncSending || this._tncPendingPacket || this._tncOutboundQueue.length === 0) return;
         if (!this.IsTncFree()) return;
+        
         this._tncSending = true;
-        const packet = this._tncOutboundQueue.shift();
+        this._tncPendingPacket = this._tncOutboundQueue[0]; // Keep packet in queue until confirmed
         
         /*
         // Extract channel information from packet
-        const flags = packet[0];
+        const flags = this._tncPendingPacket[0];
         const with_channel_id = (flags & 0x40) !== 0;
         let channelInfo = 'Unknown';
         
-        if (with_channel_id && packet.length > 1) {
-            const channel_id = packet[packet.length - 1]; // Channel ID is last byte
+        if (with_channel_id && this._tncPendingPacket.length > 1) {
+            const channel_id = this._tncPendingPacket[this._tncPendingPacket.length - 1]; // Channel ID is last byte
             channelInfo = `${channel_id}`;
             
             // Add channel name if available
@@ -354,16 +357,12 @@ class Radio extends EventEmitter {
         */
        
         // Debug: Print the packet being sent in HEX and channel information
-        //console.log(`[Radio] _processTncQueue sending packet (HEX): ${Array.from(packet).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' ')}`);
-        //console.log(`[Radio] _processTncQueue sending packet (length): ${packet.length} bytes`);
+        //console.log(`[Radio] _processTncQueue sending packet (HEX): ${Array.from(this._tncPendingPacket).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' ')}`);
+        //console.log(`[Radio] _processTncQueue sending packet (length): ${this._tncPendingPacket.length} bytes`);
         //console.log(`[Radio] _processTncQueue sending packet (channel): ${channelInfo}`);
         
-        this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.HT_SEND_DATA, packet);
-        this._tncSending = false;
-        // If more packets, try to send next
-        if (this._tncOutboundQueue.length > 0) {
-            setTimeout(() => this._processTncQueue(), 10);
-        }
+        this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.HT_SEND_DATA, this._tncPendingPacket);
+        // Note: _tncSending remains true and packet stays in queue until we get response
     }
 
     /**
@@ -526,9 +525,38 @@ class Radio extends EventEmitter {
                         if (val === errorCode) { errorName = key; break; }
                     }
                     console.log(`[Radio] HT_SEND_DATA response: errorCode=${errorCode} (${errorName})`);
-                    // If radio is free and queue is not empty, send next packet
-                    if (this._tncOutboundQueue.length > 0) {
-                        setTimeout(() => this._processTncQueue(), 10);
+                    
+                    if (errorCode === RadioCommandErrors.SUCCESS) {
+                        // Packet sent successfully - remove from queue
+                        if (this._tncPendingPacket && this._tncOutboundQueue.length > 0) {
+                            this._tncOutboundQueue.shift(); // Remove the successfully sent packet
+                            this._tncPendingPacket = null;
+                        }
+                        this._tncSending = false;
+                        
+                        // Process next packet if any
+                        if (this._tncOutboundQueue.length > 0) {
+                            setTimeout(() => this._processTncQueue(), 10);
+                        }
+                    } else if (errorCode === RadioCommandErrors.INCORRECT_STATE) {
+                        // Radio not ready - keep packet in queue, will retry on HT_STATUS_CHANGED
+                        console.log(`[Radio] Radio in incorrect state for transmission - packet will be retried when radio is ready`);
+                        this._tncPendingPacket = null;
+                        this._tncSending = false;
+                        // Don't process queue now - wait for HT_STATUS_CHANGED notification
+                    } else {
+                        // Other errors - could be retried or discarded based on error type
+                        console.warn(`[Radio] HT_SEND_DATA failed with error ${errorCode} (${errorName}) - removing packet from queue`);
+                        if (this._tncPendingPacket && this._tncOutboundQueue.length > 0) {
+                            this._tncOutboundQueue.shift(); // Remove the failed packet
+                            this._tncPendingPacket = null;
+                        }
+                        this._tncSending = false;
+                        
+                        // Try next packet if any
+                        if (this._tncOutboundQueue.length > 0) {
+                            setTimeout(() => this._processTncQueue(), 50); // Slightly longer delay for other errors
+                        }
                     }
                     break;
                 case RadioBasicCommand.GET_DEV_INFO:

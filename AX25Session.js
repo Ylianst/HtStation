@@ -645,7 +645,7 @@ class AX25Session extends EventEmitter {
         }
     }
     
-    send(info) {
+    send(info, immediate = false) {
         if (typeof info === 'string') {
             info = Buffer.from(info, 'utf8');
         }
@@ -674,7 +674,11 @@ class AX25Session extends EventEmitter {
             this._state.sendBuffer.push(dataPacket);
         }
         
-        if (!this._timers.t2) {
+        if (immediate) {
+            // Force immediate transmission without delay
+            this._clearTimer('t2');
+            this._drain(false);
+        } else if (!this._timers.t2) {
             this._drain(false);
         }
     }
