@@ -63,6 +63,15 @@ class AX25Session extends EventEmitter {
             receiveBuffer: new Map() // Buffer for out-of-order packets
         };
         
+        // Session statistics
+        this._stats = {
+            packetsSent: 0,
+            packetsReceived: 0,
+            bytesSent: 0,
+            bytesReceived: 0,
+            connectionStartTime: null
+        };
+        
         // Timers
         this._timers = {
             connect: null,
@@ -100,6 +109,18 @@ class AX25Session extends EventEmitter {
     
     get sendBufferLength() {
         return this._state.sendBuffer.length;
+    }
+    
+    get sessionStatistics() {
+        return {
+            packetsSent: this._stats.packetsSent,
+            packetsReceived: this._stats.packetsReceived,
+            bytesSent: this._stats.bytesSent,
+            bytesReceived: this._stats.bytesReceived,
+            connectionStartTime: this._stats.connectionStartTime,
+            connectionDuration: this._stats.connectionStartTime ? 
+                Math.floor((new Date().getTime() - this._stats.connectionStartTime.getTime()) / 1000) : 0
+        };
     }
     
     // Event emission helpers
@@ -154,6 +175,15 @@ class AX25Session extends EventEmitter {
             const serialized = packet.toByteArray();
             if (serialized) {
                 this._trace(`Sending TNC frame on channel ${channelId}, data length: ${serialized.length}`);
+                
+                // Track session statistics for sent packets
+                if (this._state.connection === AX25Session.ConnectionState.CONNECTED || 
+                    this._state.connection === AX25Session.ConnectionState.CONNECTING ||
+                    this._state.connection === AX25Session.ConnectionState.DISCONNECTING) {
+                    this._stats.packetsSent++;
+                    this._stats.bytesSent += serialized.length;
+                    this._trace(`Session stats: sent ${this._stats.packetsSent} packets, ${this._stats.bytesSent} bytes`);
+                }
                 
                 // Debug: Log packet details for UA frames
                 if (packet.type === AX25Packet.FrameType.U_FRAME_UA) {
@@ -688,6 +718,20 @@ class AX25Session extends EventEmitter {
         
         this._trace(`Receive ${packet.type}`);
         
+        // Track received packet statistics
+        if (this._state.connection === AX25Session.ConnectionState.CONNECTED || 
+            this._state.connection === AX25Session.ConnectionState.CONNECTING ||
+            this._state.connection === AX25Session.ConnectionState.DISCONNECTING) {
+            this._stats.packetsReceived++;
+            // Estimate received bytes based on packet type and data
+            let packetSize = 20; // Base AX.25 header size
+            if (packet.data && packet.data.length > 0) {
+                packetSize += packet.data.length;
+            }
+            this._stats.bytesReceived += packetSize;
+            this._trace(`Session stats: received ${this._stats.packetsReceived} packets, ${this._stats.bytesReceived} bytes`);
+        }
+        
         // Debug: Log incoming SABM packet details
         if (packet.type === AX25Packet.FrameType.U_FRAME_SABM || packet.type === AX25Packet.FrameType.U_FRAME_SABME) {
             this._trace(`Incoming SABM packet details:`);
@@ -849,6 +893,8 @@ class AX25Session extends EventEmitter {
                 this._renumber();
                 response.type = AX25Packet.FrameType.U_FRAME_UA;
                 newState = AX25Session.ConnectionState.CONNECTED;
+                // Initialize connection start time for statistics
+                this._stats.connectionStartTime = new Date();
                 // Start T3 idle timer when connection is established
                 this._setTimer('t3');
                 break;

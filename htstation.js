@@ -94,6 +94,7 @@ const { AprsPacket } = require('./aprs');
 const AprsHandler = require('./aprs.js');
 const EchoServer = require('./echoserver.js');
 const BbsServer = require('./bbs.js');
+const WebServer = require('./webserver.js');
 
 // Initialize APRS handler
 const aprsHandler = new AprsHandler(config, radio, mqttReporter);
@@ -103,6 +104,32 @@ const echoServer = new EchoServer(config, radio);
 
 // Initialize BBS Server
 const bbsServer = new BbsServer(config, radio);
+
+// Initialize Web Server (if enabled)
+let webServer = null;
+if (config.WEBSERVERPORT) {
+    const webServerPort = parseInt(config.WEBSERVERPORT, 10);
+    if (webServerPort > 0) {
+        try {
+            webServer = new WebServer(config, radio, bbsServer, aprsHandler);
+            webServer.start(webServerPort)
+                .then(() => {
+                    console.log(`[App] Web server started successfully on port ${webServerPort}`);
+                })
+                .catch((error) => {
+                    console.error('[App] Failed to start web server:', error.message);
+                    webServer = null;
+                });
+        } catch (error) {
+            console.error('[App] Web server initialization failed:', error.message);
+            webServer = null;
+        }
+    } else {
+        console.log('[App] Web server disabled (WEBSERVERPORT is 0)');
+    }
+} else {
+    console.log('[App] Web server disabled (WEBSERVERPORT not configured)');
+}
 
 radio.on('data', (frame) => {
     // Attempt to decode AX.25 packet

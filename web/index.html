@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Handi-Talky Station</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Title Bar -->
+    <header class="title-bar">
+        <h1>Handi-Talky Station</h1>
+        <div class="title-status">
+            <div class="status-item">
+                <span class="label">Radio:</span>
+                <span id="radio-status" class="status">Unknown</span>
+            </div>
+            <div class="status-item">
+                <span class="label">WebSocket:</span>
+                <span id="ws-status" class="status">Connecting...</span>
+            </div>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <!-- Left Sidebar Navigation -->
+        <aside class="sidebar">
+            <nav class="nav-menu">
+                <ul>
+                    <li><a href="#" class="nav-item active" data-view="overview">Overview</a></li>
+                    <li><a href="#" class="nav-item" data-view="current-connections">Current Connections</a></li>
+                    <li><a href="#" class="nav-item" data-view="last-connections">Last Connections</a></li>
+                    <li><a href="#" class="nav-item" data-view="aprs-messages">APRS Messages</a></li>
+                    <li><a href="#" class="nav-item" data-view="bulletins">Active Bulletins</a></li>
+                </ul>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <div class="status-info">
+                    <div class="status-item">
+                        <span class="label">Station:</span>
+                        <span id="station-callsign" class="value">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Uptime:</span>
+                        <span id="app-uptime" class="value">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Active:</span>
+                        <span id="active-connections" class="value">0</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Updated:</span>
+                        <span id="last-update" class="value">--</span>
+                    </div>
+                </div>
+                
+                <div class="controls">
+                    <button id="refresh-btn" onclick="refreshData()">Refresh</button>
+                    <button id="auto-refresh-btn" onclick="toggleAutoRefresh()">Auto: ON</button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="content-area">
+            <!-- Overview View -->
+            <div id="view-overview" class="content-view active">
+                <h2>System Overview</h2>
+                <div class="overview-grid">
+                    <div class="overview-card">
+                        <h3>Current BBS Connections</h3>
+                        <div id="overview-current-connections" class="overview-data">
+                            <div class="no-data">No active connections</div>
+                        </div>
+                    </div>
+                    
+                    <div class="overview-card">
+                        <h3>Recent Activity</h3>
+                        <div id="overview-recent-activity" class="overview-data">
+                            <div class="loading">Loading...</div>
+                        </div>
+                    </div>
+                    
+                    <div class="overview-card">
+                        <h3>System Status</h3>
+                        <div class="system-status">
+                            <div class="status-row">
+                                <span>Radio Connection:</span>
+                                <span id="overview-radio-status" class="status">Unknown</span>
+                            </div>
+                            <div class="status-row">
+                                <span>Application Uptime:</span>
+                                <span id="overview-uptime" class="value">--</span>
+                            </div>
+                            <div class="status-row">
+                                <span>Active Sessions:</span>
+                                <span id="overview-active" class="value">0</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Current Connections View -->
+            <div id="view-current-connections" class="content-view">
+                <h2>Current BBS Connections</h2>
+                <div id="session-terminals" class="session-terminals">
+                    <!-- Terminal interfaces will be dynamically created here -->
+                </div>
+                <div id="current-connections" class="data-section">
+                    <div class="no-data">No active connections</div>
+                </div>
+            </div>
+
+            <!-- Last Connections View -->
+            <div id="view-last-connections" class="content-view">
+                <h2>Recent BBS Connections</h2>
+                <div id="bbs-connections" class="data-section">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+
+            <!-- APRS Messages View -->
+            <div id="view-aprs-messages" class="content-view">
+                <h2>Recent APRS Messages</h2>
+                <div id="aprs-messages" class="data-section">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+
+            <!-- Active Bulletins View -->
+            <div id="view-bulletins" class="content-view">
+                <h2>Active BBS Bulletins</h2>
+                <div id="bulletins" class="data-section">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

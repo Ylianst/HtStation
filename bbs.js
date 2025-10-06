@@ -1,5 +1,6 @@
 'use strict';
 
+const EventEmitter = require('events');
 const AX25Session = require('./AX25Session');
 const AX25Packet = require('./AX25Packet');
 const Storage = require('./storage');
@@ -10,8 +11,9 @@ const GuessTheNumberGame = require('./games-guess');
 const BlackjackGame = require('./games-blackjack');
 const JokeGame = require('./games-joke');
 
-class BbsServer {
+class BbsServer extends EventEmitter {
     constructor(config, radio) {
+        super();
         this.config = config;
         this.radio = radio;
         this.RADIO_CALLSIGN = config.CALLSIGN;
@@ -34,6 +36,24 @@ class BbsServer {
         } catch (error) {
             console.error('[BBS Server] Failed to initialize connection logging:', error);
             this.storage = null;
+        }
+        
+        // === APRS Message Storage Access ===
+        try {
+            this.aprsMessageStorage = new Storage('./data/aprs-messages.db');
+            console.log('[BBS Server] APRS message storage access initialized');
+        } catch (error) {
+            console.error('[BBS Server] Failed to initialize APRS message storage access:', error);
+            this.aprsMessageStorage = null;
+        }
+        
+        // === Bulletin Storage ===
+        try {
+            this.bulletinStorage = new Storage('./data/bbs-bulletins.db');
+            console.log('[BBS Server] Bulletin storage initialized');
+        } catch (error) {
+            console.error('[BBS Server] Failed to initialize bulletin storage:', error);
+            this.bulletinStorage = null;
         }
     }
     
@@ -101,9 +121,25 @@ class BbsServer {
                     // Send welcome message with last connection info when session is established
                     const welcomeMessage = this.generateWelcomeMessage(sessionKey, lastConnectionInfo);
                     console.log(`[BBS Session] Sending welcome message to ${sessionKey}`);
+                    
+                    // Emit welcome message event for web interface
+                    this.emit('sessionDataSent', {
+                        sessionKey: sessionKey,
+                        data: welcomeMessage,
+                        direction: 'sent',
+                        timestamp: new Date().toISOString()
+                    });
+                    
                     session.send(Buffer.from(welcomeMessage), true); // Use immediate sending
                 } else if (state === AX25Session.ConnectionState.DISCONNECTED) {
                     console.log(`[BBS Session] Removing disconnected session for ${sessionKey}`);
+                    
+                    // Get session statistics before removing session
+                    const sessionStats = session.sessionStatistics;
+                    
+                    // Update the connection log with session statistics
+                    this.updateConnectionLogWithStats(sessionKey, sessionStats);
+                    
                     this.activeSessions.delete(sessionKey);
                     this.sessionStartTimes.delete(sessionKey);
                     this.sessionMenuStates.delete(sessionKey);
@@ -113,6 +149,15 @@ class BbsServer {
             
             session.on('dataReceived', (data) => {
                 console.log(`[BBS Session] ${sessionKey} received ${data.length} bytes: ${data.toString()}`);
+                
+                // Emit data event for web interface
+                this.emit('sessionDataReceived', {
+                    sessionKey: sessionKey,
+                    data: data.toString(),
+                    direction: 'received',
+                    timestamp: new Date().toISOString()
+                });
+                
                 // Process BBS commands
                 if (session.currentState === AX25Session.ConnectionState.CONNECTED) {
                     const command = data.toString().trim().toLowerCase();
@@ -121,6 +166,15 @@ class BbsServer {
                     
                     if (response) {
                         console.log(`[BBS Session] Sending command response to ${sessionKey}`);
+                        
+                        // Emit data event for web interface
+                        this.emit('sessionDataSent', {
+                            sessionKey: sessionKey,
+                            data: response,
+                            direction: 'sent',
+                            timestamp: new Date().toISOString()
+                        });
+                        
                         session.send(Buffer.from(response), true); // Use immediate sending for user responses
                     }
                 }
@@ -262,6 +316,40 @@ class BbsServer {
         }
     }
     
+    updateConnectionLogWithStats(sessionKey, sessionStats) {
+        if (!this.storage || !sessionStats) {
+            console.log('[BBS Server] Storage not available or no stats, skipping connection log update');
+            return;
+        }
+        
+        try {
+            // Find the most recent connection record for this session
+            const connectionKeys = this.storage.list('connection-%');
+            connectionKeys.sort().reverse(); // Newest first
+            
+            for (const key of connectionKeys) {
+                const record = this.storage.load(key);
+                if (record && record.callsign === sessionKey) {
+                    // Update the record with session statistics
+                    record.packetsSent = sessionStats.packetsSent;
+                    record.packetsReceived = sessionStats.packetsReceived;
+                    record.bytesSent = sessionStats.bytesSent;
+                    record.bytesReceived = sessionStats.bytesReceived;
+                    record.connectionDuration = sessionStats.connectionDuration;
+                    
+                    if (this.storage.save(key, record)) {
+                        console.log(`[BBS Server] Updated connection log for ${sessionKey} with session stats: ${sessionStats.packetsSent}/${sessionStats.packetsReceived} packets, ${sessionStats.bytesSent}/${sessionStats.bytesReceived} bytes, ${sessionStats.connectionDuration}s duration`);
+                    } else {
+                        console.error(`[BBS Server] Failed to update connection log for ${sessionKey} with session stats`);
+                    }
+                    break; // Only update the most recent connection
+                }
+            }
+        } catch (error) {
+            console.error('[BBS Server] Error updating connection log with stats:', error);
+        }
+    }
+    
     cleanupOldConnections() {
         try {
             // Get all connection keys
@@ -331,6 +419,385 @@ class BbsServer {
         }
     }
     
+    getLastAprsMessages() {
+        if (!this.aprsMessageStorage) {
+            return `APRS message storage not available.\r\n\r\n`;
+        }
+        
+        try {
+            // Get all APRS message keys and sort them (newest first)
+            const messageKeys = this.aprsMessageStorage.list('aprs-msg-%');
+            messageKeys.sort().reverse();
+            
+            // Get the last 20 messages
+            const recentKeys = messageKeys.slice(0, 20);
+            
+            if (recentKeys.length === 0) {
+                return `No APRS messages recorded yet.\r\n\r\n`;
+            }
+            
+            // Load the message records
+            const messages = [];
+            for (const key of recentKeys) {
+                const record = this.aprsMessageStorage.load(key);
+                if (record) {
+                    messages.push(record);
+                }
+            }
+            
+            // Format the output
+            let output = `${this.RADIO_CALLSIGN} BBS - Last received APRS messages\r\n`;
+            output += `==========================================\r\n`;
+            output += `Source     Dest       Message\r\n`;
+            output += `------------------------------------------\r\n`;
+            
+            for (const msg of messages) {
+                const source = msg.source.padEnd(10);
+                const dest = msg.destination.padEnd(10);
+                const message = msg.message.length > 45 ? msg.message.substring(0, 42) + '...' : msg.message;
+                output += `${source} ${dest} ${message}\r\n`;
+            }
+            
+            output += `\r\nTotal: ${messages.length} message${messages.length !== 1 ? 's' : ''}\r\n\r\n`;
+            
+            return output;
+        } catch (error) {
+            console.error('[BBS Server] Error retrieving APRS messages:', error);
+            return `Error retrieving APRS message history.\r\n\r\n`;
+        }
+    }
+    
+    // Bulletin Management Methods
+    createBulletin(callsign, message, expireDays = 7) {
+        if (!this.bulletinStorage) {
+            return { success: false, error: 'Bulletin storage not available' };
+        }
+        
+        // Validate message length
+        if (message.length > 300) {
+            return { success: false, error: 'Bulletin message exceeds 300 character limit' };
+        }
+        
+        if (message.trim().length === 0) {
+            return { success: false, error: 'Bulletin message cannot be empty' };
+        }
+        
+        try {
+            // Clean up expired bulletins first
+            this.cleanupExpiredBulletins();
+            
+            // Check how many bulletins this callsign already has
+            const existingBulletins = this.getBulletinsByCallsign(callsign);
+            if (existingBulletins.length >= 3) {
+                return { success: false, error: 'You already have 3 bulletins. Delete or wait for expiration before posting new ones.' };
+            }
+            
+            const now = new Date();
+            const expireDate = new Date(now.getTime() + (expireDays * 24 * 60 * 60 * 1000));
+            
+            const bulletin = {
+                id: now.getTime(), // Use timestamp as unique ID
+                callsign: callsign.toUpperCase(),
+                message: message.trim(),
+                postedTime: now.toISOString(),
+                expireTime: expireDate.toISOString(),
+                postedTimeLocal: now.toLocaleString('en-US', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false
+                }),
+                expireTimeLocal: expireDate.toLocaleString('en-US', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false
+                }),
+                expireDays: expireDays
+            };
+            
+            const storageKey = `bulletin-${bulletin.id}`;
+            
+            if (this.bulletinStorage.save(storageKey, bulletin)) {
+                console.log(`[BBS Bulletin] Created bulletin ${bulletin.id} by ${callsign}: "${message}"`);
+                return { success: true, bulletin: bulletin };
+            } else {
+                return { success: false, error: 'Failed to save bulletin' };
+            }
+        } catch (error) {
+            console.error('[BBS Bulletin] Error creating bulletin:', error);
+            return { success: false, error: 'Internal error creating bulletin' };
+        }
+    }
+    
+    deleteBulletin(callsign, bulletinId) {
+        if (!this.bulletinStorage) {
+            return { success: false, error: 'Bulletin storage not available' };
+        }
+        
+        try {
+            const storageKey = `bulletin-${bulletinId}`;
+            const bulletin = this.bulletinStorage.load(storageKey);
+            
+            if (!bulletin) {
+                return { success: false, error: 'Bulletin not found' };
+            }
+            
+            // Only allow deletion by the original poster
+            if (bulletin.callsign.toUpperCase() !== callsign.toUpperCase()) {
+                return { success: false, error: 'You can only delete your own bulletins' };
+            }
+            
+            if (this.bulletinStorage.delete(storageKey)) {
+                console.log(`[BBS Bulletin] Deleted bulletin ${bulletinId} by ${callsign}`);
+                return { success: true };
+            } else {
+                return { success: false, error: 'Failed to delete bulletin' };
+            }
+        } catch (error) {
+            console.error('[BBS Bulletin] Error deleting bulletin:', error);
+            return { success: false, error: 'Internal error deleting bulletin' };
+        }
+    }
+    
+    getBulletinsByCallsign(callsign) {
+        if (!this.bulletinStorage) {
+            return [];
+        }
+        
+        try {
+            // Clean up expired bulletins first
+            this.cleanupExpiredBulletins();
+            
+            const bulletinKeys = this.bulletinStorage.list('bulletin-%');
+            const bulletins = [];
+            
+            for (const key of bulletinKeys) {
+                const bulletin = this.bulletinStorage.load(key);
+                if (bulletin && bulletin.callsign.toUpperCase() === callsign.toUpperCase()) {
+                    bulletins.push(bulletin);
+                }
+            }
+            
+            // Sort by posted time (newest first)
+            bulletins.sort((a, b) => new Date(b.postedTime) - new Date(a.postedTime));
+            
+            return bulletins;
+        } catch (error) {
+            console.error('[BBS Bulletin] Error retrieving bulletins by callsign:', error);
+            return [];
+        }
+    }
+    
+    getAllActiveBulletins() {
+        if (!this.bulletinStorage) {
+            return [];
+        }
+        
+        try {
+            // Clean up expired bulletins first
+            this.cleanupExpiredBulletins();
+            
+            const bulletinKeys = this.bulletinStorage.list('bulletin-%');
+            const bulletins = [];
+            
+            for (const key of bulletinKeys) {
+                const bulletin = this.bulletinStorage.load(key);
+                if (bulletin) {
+                    bulletins.push(bulletin);
+                }
+            }
+            
+            // Sort by posted time (newest first)
+            bulletins.sort((a, b) => new Date(b.postedTime) - new Date(a.postedTime));
+            
+            return bulletins;
+        } catch (error) {
+            console.error('[BBS Bulletin] Error retrieving all bulletins:', error);
+            return [];
+        }
+    }
+    
+    cleanupExpiredBulletins() {
+        if (!this.bulletinStorage) {
+            return;
+        }
+        
+        try {
+            const now = new Date();
+            const bulletinKeys = this.bulletinStorage.list('bulletin-%');
+            let deletedCount = 0;
+            
+            for (const key of bulletinKeys) {
+                const bulletin = this.bulletinStorage.load(key);
+                if (bulletin && new Date(bulletin.expireTime) <= now) {
+                    this.bulletinStorage.delete(key);
+                    deletedCount++;
+                    console.log(`[BBS Bulletin] Expired bulletin ${bulletin.id} by ${bulletin.callsign}`);
+                }
+            }
+            
+            if (deletedCount > 0) {
+                console.log(`[BBS Bulletin] Cleaned up ${deletedCount} expired bulletin${deletedCount !== 1 ? 's' : ''}`);
+            }
+        } catch (error) {
+            console.error('[BBS Bulletin] Error cleaning up expired bulletins:', error);
+        }
+    }
+    
+    getBulletinsDisplay() {
+        const bulletins = this.getAllActiveBulletins();
+        
+        if (bulletins.length === 0) {
+            return `${this.RADIO_CALLSIGN} BBS - Active Bulletins\r\n` +
+                   `=============================\r\n` +
+                   `No active bulletins.\r\n\r\n`;
+        }
+        
+        let output = `${this.RADIO_CALLSIGN} BBS - Active Bulletins\r\n`;
+        output += `=============================\r\n`;
+        
+        bulletins.forEach((bulletin, index) => {
+            const expireDate = new Date(bulletin.expireTime);
+            const now = new Date();
+            const daysLeft = Math.ceil((expireDate - now) / (1000 * 60 * 60 * 24));
+            
+            output += `[${index + 1}] From: ${bulletin.callsign}\r\n`;
+            output += `    Posted: ${bulletin.postedTimeLocal}\r\n`;
+            output += `    Expires: ${daysLeft} day${daysLeft !== 1 ? 's' : ''}\r\n`;
+            output += `    Message: ${bulletin.message}\r\n`;
+            if (index < bulletins.length - 1) {
+                output += `\r\n`;
+            }
+        });
+        
+        output += `\r\nTotal: ${bulletins.length} bulletin${bulletins.length !== 1 ? 's' : ''}\r\n\r\n`;
+        
+        return output;
+    }
+    
+    getBulletinCreatePrompt(sessionKey) {
+        const callsign = sessionKey.split('-')[0]; // Extract callsign without SSID
+        const existingBulletins = this.getBulletinsByCallsign(callsign);
+        
+        let prompt = `${this.RADIO_CALLSIGN} BBS - Post New Bulletin\r\n`;
+        prompt += `================================\r\n`;
+        prompt += `You currently have ${existingBulletins.length}/3 bulletins.\r\n\r\n`;
+        
+        if (existingBulletins.length >= 3) {
+            prompt += `You have reached the maximum of 3 bulletins.\r\n`;
+            prompt += `Delete an existing bulletin before posting a new one.\r\n\r\n`;
+            prompt += `Type 'MAIN' to return to main menu.\r\n`;
+        } else {
+            prompt += `Enter your bulletin message (300 char max):\r\n`;
+            prompt += `Or type 'MAIN' to return to main menu.\r\n`;
+        }
+        
+        return prompt;
+    }
+    
+    getBulletinDeletePrompt(sessionKey) {
+        const callsign = sessionKey.split('-')[0]; // Extract callsign without SSID
+        const userBulletins = this.getBulletinsByCallsign(callsign);
+        
+        let prompt = `${this.RADIO_CALLSIGN} BBS - Delete Your Bulletins\r\n`;
+        prompt += `====================================\r\n`;
+        
+        if (userBulletins.length === 0) {
+            prompt += `You have no bulletins to delete.\r\n\r\n`;
+            prompt += `Type 'MAIN' to return to main menu.\r\n`;
+        } else {
+            prompt += `Your bulletins:\r\n\r\n`;
+            
+            userBulletins.forEach((bulletin, index) => {
+                const expireDate = new Date(bulletin.expireTime);
+                const now = new Date();
+                const daysLeft = Math.ceil((expireDate - now) / (1000 * 60 * 60 * 24));
+                
+                prompt += `[${index + 1}] ID: ${bulletin.id}\r\n`;
+                prompt += `    Posted: ${bulletin.postedTimeLocal}\r\n`;
+                prompt += `    Expires: ${daysLeft} day${daysLeft !== 1 ? 's' : ''}\r\n`;
+                prompt += `    Message: ${bulletin.message}\r\n\r\n`;
+            });
+            
+            prompt += `Enter bulletin number (1-${userBulletins.length}) to delete,\r\n`;
+            prompt += `or type 'MAIN' to return to main menu.\r\n`;
+        }
+        
+        return prompt;
+    }
+    
+    processBulletinCreate(sessionKey, input) {
+        const callsign = sessionKey.split('-')[0]; // Extract callsign without SSID
+        
+        if (input.toLowerCase() === 'main') {
+            this.sessionMenuStates.set(sessionKey, 'main');
+            return this.getMainMenu();
+        }
+        
+        // Validate input
+        if (input.trim().length === 0) {
+            return `Bulletin message cannot be empty.\r\nPlease enter your message or 'MAIN' to return:\r\n`;
+        }
+        
+        if (input.length > 300) {
+            return `Message too long (${input.length}/300 characters).\r\nPlease shorten your message:\r\n`;
+        }
+        
+        // Create the bulletin
+        const result = this.createBulletin(callsign, input);
+        
+        if (result.success) {
+            this.sessionMenuStates.set(sessionKey, 'main');
+            return `Bulletin posted successfully!\r\n` +
+                   `Bulletin ID: ${result.bulletin.id}\r\n` +
+                   `Expires: ${result.bulletin.expireTimeLocal}\r\n\r\n` +
+                   this.getMainMenu();
+        } else {
+            this.sessionMenuStates.set(sessionKey, 'main');
+            return `Error posting bulletin: ${result.error}\r\n\r\n` + this.getMainMenu();
+        }
+    }
+    
+    processBulletinDelete(sessionKey, input) {
+        const callsign = sessionKey.split('-')[0]; // Extract callsign without SSID
+        
+        if (input.toLowerCase() === 'main') {
+            this.sessionMenuStates.set(sessionKey, 'main');
+            return this.getMainMenu();
+        }
+        
+        const userBulletins = this.getBulletinsByCallsign(callsign);
+        
+        if (userBulletins.length === 0) {
+            this.sessionMenuStates.set(sessionKey, 'main');
+            return `You have no bulletins to delete.\r\n\r\n` + this.getMainMenu();
+        }
+        
+        const bulletinNumber = parseInt(input.trim());
+        
+        if (isNaN(bulletinNumber) || bulletinNumber < 1 || bulletinNumber > userBulletins.length) {
+            return `Invalid bulletin number. Please enter 1-${userBulletins.length} or 'MAIN':\r\n`;
+        }
+        
+        const bulletinToDelete = userBulletins[bulletinNumber - 1];
+        const result = this.deleteBulletin(callsign, bulletinToDelete.id);
+        
+        if (result.success) {
+            this.sessionMenuStates.set(sessionKey, 'main');
+            return `Bulletin deleted successfully!\r\n\r\n` + this.getMainMenu();
+        } else {
+            this.sessionMenuStates.set(sessionKey, 'main');
+            return `Error deleting bulletin: ${result.error}\r\n\r\n` + this.getMainMenu();
+        }
+    }
+    
     // Command Processing with Menu System
     processCommand(sessionKey, command, currentMenu) {
         let response = '';
@@ -358,6 +825,12 @@ class BbsServer {
                 break;
             case 'games':
                 response = this.processGamesMenuCommand(sessionKey, command);
+                break;
+            case 'bulletin_create':
+                response = this.processBulletinCreate(sessionKey, command);
+                break;
+            case 'bulletin_delete':
+                response = this.processBulletinDelete(sessionKey, command);
                 break;
             case 'guess_number':
             case 'blackjack':
@@ -408,6 +881,19 @@ class BbsServer {
             case 'lc':
             case 'lastconnections':
                 return this.getLastConnections();
+            case 'aprsmsgs':
+                return this.getLastAprsMessages();
+            case 'b':
+            case 'bull':
+                return this.getBulletinsDisplay();
+            case 'newb':
+                // Switch to bulletin creation mode
+                this.sessionMenuStates.set(sessionKey, 'bulletin_create');
+                return this.getBulletinCreatePrompt(sessionKey);
+            case 'delb':
+                // Switch to bulletin deletion mode
+                this.sessionMenuStates.set(sessionKey, 'bulletin_delete');
+                return this.getBulletinDeletePrompt(sessionKey);
             case 'g':
             case 'games':
                 // Switch to games menu
@@ -448,29 +934,28 @@ class BbsServer {
     getMainMenu() {
         return `${this.RADIO_CALLSIGN} BBS - Main Menu\r\n` +
                `========================\r\n` +
-               `M or MENU - Display this menu\r\n` +
-               `T or TIME - Display current time\r\n` +
+               `[M]ENU    - Display this menu\r\n` +
+               `[T]IME    - Display current time\r\n` +
                `UPTIME    - Display system uptime\r\n` +
                `LC        - Last connections to BBS\r\n` +
-               `G or GAMES- Games submenu\r\n` +
-               `BYE       - Disconnect from BBS\r\n` +
-               `\r\n` +
-               `Enter command: `;
+               `APRSMSGS  - Last received APRS messages\r\n` +
+               `[B]ULL    - View active bulletins\r\n` +
+               `NEWB      - Post new bulletin\r\n` +
+               `DELB      - Delete your bulletin\r\n` +
+               `[G]AMES   - Games submenu\r\n` +
+               `BYE       - Disconnect from BBS\r\n`;
     }
     
     getGamesMenu() {
         return `${this.RADIO_CALLSIGN} BBS - Games Menu\r\n` +
                `=========================\r\n` +
-               `M or MENU - Display this menu\r\n` +
-               `G or GUESS- Guess the Number game\r\n` +
-               `B or BLKJK- Blackjack game\r\n` +
-               `J or JOKE - Joke of the Day\r\n` +
+               `[M]ENU    - Display this menu\r\n` +
+               `[G]UESS   - Guess the Number game\r\n` +
+               `[B]LKJK   - Blackjack game\r\n` +
+               `[J]OKE    - Joke of the Day\r\n` +
                `MAIN      - Return to main menu\r\n` +
-               `BYE       - Disconnect from BBS\r\n` +
-               `\r\n` +
-               `Enter command: `;
+               `BYE       - Disconnect from BBS\r\n`;
     }
-    
     
     getDisconnectMessage(sessionKey) {
         let message = `\r\nThank you for using ${this.RADIO_CALLSIGN} BBS!`;

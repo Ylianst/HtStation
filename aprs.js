@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const { AprsPacket } = require('./aprs/index.js');
+const Storage = require('./storage');
 
 class AprsHandler {
     constructor(config, radio, mqttReporter) {
@@ -25,6 +26,17 @@ class AprsHandler {
         // Station Authentication Table
         this.stationAuthTable = new Map();
         this.initializeAuthTable();
+        
+        // APRS Message Storage for BBS access
+        // Store messages that are not for our station for BBS retrieval
+        try {
+            this.aprsMessageStorage = new Storage('./data/aprs-messages.db');
+            this.MAX_STORED_APRS_MESSAGES = 1000;
+            console.log('[APRS] APRS message storage initialized');
+        } catch (error) {
+            console.error('[APRS] Failed to initialize APRS message storage:', error);
+            this.aprsMessageStorage = null;
+        }
     }
     
     // Initialize station authentication table from config
@@ -91,6 +103,191 @@ class AprsHandler {
     isAprsMessageDuplicate(senderCallsign, seqId) {
         const key = `${senderCallsign}:${seqId}`;
         return this.aprsMessageCache.has(key);
+    }
+    
+    // Store ALL APRS data for BBS retrieval (all packet types)
+    storeAllAprsData(aprsPacket, packet) {
+        if (!this.aprsMessageStorage) {
+            return false; // Storage not available
+        }
+        
+        try {
+            const now = new Date();
+            const timestamp = now.toISOString();
+            const localTime = now.toLocaleString('en-US', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: false
+            });
+            
+            // Get source callsign from packet addresses
+            const senderAddress = packet.addresses.length > 1 ? packet.addresses[1] : packet.addresses[0];
+            const sourceCallsign = senderAddress.address + (senderAddress.SSID > 0 ? `-${senderAddress.SSID}` : '');
+            
+            let destinationCallsign = '';
+            let messageText = '';
+            
+            // Extract information based on APRS data type
+            switch (aprsPacket.dataType) {
+                case 'Message':
+                    if (aprsPacket.messageData) {
+                        destinationCallsign = aprsPacket.messageData.addressee || '';
+                        messageText = aprsPacket.messageData.msgText || '';
+                    }
+                    break;
+                case 'Position':
+                    destinationCallsign = 'APRS-POSITION';
+                    if (aprsPacket.position) {
+                        messageText = `Lat: ${aprsPacket.position.latitude}, Lon: ${aprsPacket.position.longitude}`;
+                        if (aprsPacket.comment) {
+                            messageText += ` - ${aprsPacket.comment}`;
+                        }
+                    }
+                    break;
+                case 'Weather':
+                    destinationCallsign = 'APRS-WEATHER';
+                    if (aprsPacket.weather) {
+                        const weather = aprsPacket.weather;
+                        messageText = `Temp: ${weather.temperature || 'N/A'}°F, Wind: ${weather.windSpeed || 'N/A'}mph @ ${weather.windDirection || 'N/A'}°`;
+                    }
+                    break;
+                case 'Status':
+                    destinationCallsign = 'APRS-STATUS';
+                    messageText = aprsPacket.status || packet.dataStr || '';
+                    break;
+                case 'Telemetry':
+                    destinationCallsign = 'APRS-TELEMETRY';
+                    messageText = packet.dataStr || 'Telemetry data';
+                    break;
+                case 'Object':
+                    destinationCallsign = 'APRS-OBJECT';
+                    messageText = aprsPacket.objectName || packet.dataStr || 'Object data';
+                    break;
+                case 'Item':
+                    destinationCallsign = 'APRS-ITEM';
+                    messageText = aprsPacket.itemName || packet.dataStr || 'Item data';
+                    break;
+                default:
+                    destinationCallsign = `APRS-${aprsPacket.dataType.toUpperCase()}`;
+                    messageText = packet.dataStr || 'Unknown APRS data';
+                    break;
+            }
+            
+            // Don't store messages addressed to our station
+            const ourCallsign = this.config.CALLSIGN.toUpperCase();
+            const isForUs = (aprsPacket.dataType === 'Message' && aprsPacket.messageData) ? 
+                (aprsPacket.messageData.addressee.trim().toUpperCase() === ourCallsign || 
+                 aprsPacket.messageData.addressee.trim().toUpperCase() === `${ourCallsign}-${this.config.STATIONID}`) : 
+                false;
+            
+            if (isForUs) {
+                return false; // Don't store messages for our station
+            }
+            
+            const messageRecord = {
+                source: sourceCallsign,
+                destination: destinationCallsign,
+                message: messageText,
+                dataType: aprsPacket.dataType,
+                timestamp: timestamp,
+                localTime: localTime
+            };
+            
+            // Use timestamp as key for natural sorting (newest first when sorted in reverse)
+            const storageKey = `aprs-msg-${now.getTime()}`;
+            
+            if (this.aprsMessageStorage.save(storageKey, messageRecord)) {
+                console.log(`[APRS Storage] Stored ${aprsPacket.dataType} from ${sourceCallsign} > ${destinationCallsign}: "${messageText}"`);
+                
+                // Maintain message limit
+                this.cleanupOldAprsMessages();
+                return true;
+            } else {
+                console.error(`[APRS Storage] Failed to store ${aprsPacket.dataType} from ${sourceCallsign}`);
+                return false;
+            }
+        } catch (error) {
+            console.error('[APRS Storage] Error storing APRS data:', error);
+            return false;
+        }
+    }
+    
+    // Store APRS message for BBS retrieval (messages not for our station)
+    storeAprsMessage(sourceCallsign, destinationCallsign, messageText) {
+        if (!this.aprsMessageStorage) {
+            return false; // Storage not available
+        }
+        
+        try {
+            const now = new Date();
+            const timestamp = now.toISOString();
+            const localTime = now.toLocaleString('en-US', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: false
+            });
+            
+            const messageRecord = {
+                source: sourceCallsign,
+                destination: destinationCallsign,
+                message: messageText,
+                timestamp: timestamp,
+                localTime: localTime
+            };
+            
+            // Use timestamp as key for natural sorting (newest first when sorted in reverse)
+            const storageKey = `aprs-msg-${now.getTime()}`;
+            
+            if (this.aprsMessageStorage.save(storageKey, messageRecord)) {
+                console.log(`[APRS Storage] Stored message ${sourceCallsign} > ${destinationCallsign}: "${messageText}"`);
+                
+                // Maintain message limit
+                this.cleanupOldAprsMessages();
+                return true;
+            } else {
+                console.error(`[APRS Storage] Failed to store message from ${sourceCallsign}`);
+                return false;
+            }
+        } catch (error) {
+            console.error('[APRS Storage] Error storing message:', error);
+            return false;
+        }
+    }
+    
+    // Cleanup old APRS messages to maintain the 1000 message limit
+    cleanupOldAprsMessages() {
+        if (!this.aprsMessageStorage) {
+            return;
+        }
+        
+        try {
+            // Get all APRS message keys
+            const messageKeys = this.aprsMessageStorage.list('aprs-msg-%');
+            
+            // If we have more than the limit, remove the oldest ones
+            if (messageKeys.length > this.MAX_STORED_APRS_MESSAGES) {
+                // Sort keys to get oldest first (they're timestamp-based)
+                messageKeys.sort();
+                
+                // Remove the oldest messages beyond the limit
+                const keysToDelete = messageKeys.slice(0, messageKeys.length - this.MAX_STORED_APRS_MESSAGES);
+                for (const key of keysToDelete) {
+                    this.aprsMessageStorage.delete(key);
+                }
+                
+                console.log(`[APRS Storage] Cleaned up ${keysToDelete.length} old APRS message records`);
+            }
+        } catch (error) {
+            console.error('[APRS Storage] Error cleaning up old messages:', error);
+        }
     }
     
     // Function to check if station requires authentication
@@ -503,6 +700,9 @@ class AprsHandler {
                     }
                 }
 
+                // Store ALL APRS messages for BBS retrieval (regardless of type)
+                this.storeAllAprsData(aprsPacket, packet);
+                
                 // Publish APRS messages to Home Assistant sensor (exclude ACK messages)
                 if (aprsPacket.dataType === 'Message' && aprsPacket.messageData && this.mqttReporter && this.config.MQTT_TOPIC) {
                     const messageText = aprsPacket.messageData.msgText || '';
@@ -575,6 +775,11 @@ class AprsHandler {
                         
                         this.mqttReporter.publishStatus(aprsMessageTopic, messageData);
                         console.log(`[MQTT] Published to ${sensorType} sensor: "${formattedMessage}"`);
+                        
+                        // Store APRS messages that are NOT for our station (for BBS retrieval)
+                        if (!isForUs) {
+                            this.storeAprsMessage(senderCallsign, addressee, messageText);
+                        }
                     } else if (isDuplicateMessage) {
                         console.log(`[APRS] Duplicate message detected from ${senderCallsign} with sequence ${messageSeqId} - skipping MQTT publish`);
                     } else if (isAckMessage) {
