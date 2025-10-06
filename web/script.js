@@ -167,6 +167,14 @@ function handleWebSocketMessage(data) {
             console.log('Processing bulletins:', data.bulletins ? data.bulletins.length : 0, 'bulletins');
             updateBulletins(data.bulletins);
             break;
+        case 'bulletin_delete_result':
+            console.log('Bulletin delete result:', data);
+            handleBulletinDeleteResult(data);
+            break;
+        case 'bulletin_create_result':
+            console.log('Bulletin create result:', data);
+            handleBulletinCreateResult(data);
+            break;
         default:
             console.log('Unknown message type:', data.type);
     }
@@ -401,6 +409,9 @@ function updateBulletins(bulletins) {
                     </div>
                     <div class="bulletin-status">
                         <span class="days-remaining">${daysRemaining} day${daysRemaining !== 1 ? 's' : ''} left</span>
+                        <button class="delete-bulletin-btn" onclick="confirmDeleteBulletin(${bulletin.id}, '${escapeHtml(bulletin.callsign)}')">
+                            Delete
+                        </button>
                     </div>
                 </div>
                 <div class="bulletin-message">${escapeHtml(bulletin.message)}</div>
@@ -804,6 +815,311 @@ function updateTerminalManagement(connections) {
         }
     });
 }
+
+// Bulletin Management Functions
+function confirmDeleteBulletin(bulletinId, callsign) {
+    const confirmed = confirm(
+        `Are you sure you want to delete bulletin #${bulletinId} by ${callsign}?\n\n` +
+        `This action cannot be undone.`
+    );
+    
+    if (confirmed) {
+        deleteBulletin(bulletinId);
+    }
+}
+
+function deleteBulletin(bulletinId) {
+    console.log(`Requesting deletion of bulletin ${bulletinId}`);
+    
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        alert('WebSocket connection not available. Cannot delete bulletin.');
+        return;
+    }
+    
+    // Disable the delete button to prevent double-clicks
+    const deleteButtons = document.querySelectorAll('.delete-bulletin-btn');
+    deleteButtons.forEach(btn => {
+        if (btn.onclick && btn.onclick.toString().includes(bulletinId)) {
+            btn.disabled = true;
+            btn.textContent = 'Deleting...';
+        }
+    });
+    
+    sendMessage({
+        type: 'delete_bulletin',
+        bulletinId: bulletinId
+    });
+}
+
+function handleBulletinDeleteResult(data) {
+    const { success, error, bulletinId } = data;
+    
+    if (success) {
+        console.log(`Successfully deleted bulletin ${bulletinId}`);
+        // The bulletin list will be automatically updated via WebSocket
+        // Show success notification
+        showNotification(`Bulletin #${bulletinId} deleted successfully`, 'success');
+    } else {
+        console.error(`Failed to delete bulletin ${bulletinId}:`, error);
+        alert(`Failed to delete bulletin: ${error}`);
+        
+        // Re-enable the delete button on failure
+        const deleteButtons = document.querySelectorAll('.delete-bulletin-btn');
+        deleteButtons.forEach(btn => {
+            if (btn.onclick && btn.onclick.toString().includes(bulletinId)) {
+                btn.disabled = false;
+                btn.textContent = 'Delete';
+            }
+        });
+    }
+}
+
+function showNotification(message, type = 'info') {
+    // Create notification element
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`;
+    notification.textContent = message;
+    
+    // Style the notification
+    notification.style.cssText = `
+        position: fixed;
+        top: 80px;
+        right: 20px;
+        padding: 12px 20px;
+        border-radius: 4px;
+        color: white;
+        font-weight: bold;
+        z-index: 10000;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        transition: all 0.3s ease;
+    `;
+    
+    // Set background color based on type
+    switch (type) {
+        case 'success':
+            notification.style.backgroundColor = '#28a745';
+            break;
+        case 'error':
+            notification.style.backgroundColor = '#dc3545';
+            break;
+        case 'warning':
+            notification.style.backgroundColor = '#ffc107';
+            notification.style.color = '#000';
+            break;
+        default:
+            notification.style.backgroundColor = '#0066cc';
+    }
+    
+    // Add to page
+    document.body.appendChild(notification);
+    
+    // Animate in
+    setTimeout(() => {
+        notification.style.transform = 'translateX(0)';
+    }, 10);
+    
+    // Remove after 3 seconds
+    setTimeout(() => {
+        notification.style.transform = 'translateX(100%)';
+        setTimeout(() => {
+            if (notification.parentNode) {
+                document.body.removeChild(notification);
+            }
+        }, 300);
+    }, 3000);
+}
+
+// Bulletin Form Toggle Functions
+function toggleBulletinForm() {
+    const form = document.getElementById('bulletin-create-form');
+    const toggleBtn = document.getElementById('toggle-create-btn');
+    
+    if (!form || !toggleBtn) return;
+    
+    if (form.style.display === 'none' || form.style.display === '') {
+        showBulletinForm();
+    } else {
+        hideBulletinForm();
+    }
+}
+
+function showBulletinForm() {
+    const form = document.getElementById('bulletin-create-form');
+    const toggleBtn = document.getElementById('toggle-create-btn');
+    const messageTextarea = document.getElementById('bulletin-message');
+    
+    if (form) {
+        form.style.display = 'block';
+        // Smooth slide-down animation
+        form.style.opacity = '0';
+        form.style.transform = 'translateY(-20px)';
+        setTimeout(() => {
+            form.style.opacity = '1';
+            form.style.transform = 'translateY(0)';
+        }, 10);
+    }
+    
+    if (toggleBtn) {
+        toggleBtn.textContent = '×';
+        toggleBtn.title = 'Cancel';
+        toggleBtn.classList.add('active');
+    }
+    
+    // Focus on textarea and update character count
+    if (messageTextarea) {
+        setTimeout(() => {
+            messageTextarea.focus();
+        }, 300);
+    }
+    updateCharacterCount();
+}
+
+function hideBulletinForm() {
+    const form = document.getElementById('bulletin-create-form');
+    const toggleBtn = document.getElementById('toggle-create-btn');
+    
+    if (form) {
+        // Smooth slide-up animation
+        form.style.opacity = '0';
+        form.style.transform = 'translateY(-20px)';
+        setTimeout(() => {
+            form.style.display = 'none';
+        }, 300);
+    }
+    
+    if (toggleBtn) {
+        toggleBtn.textContent = '+';
+        toggleBtn.title = 'Post New Bulletin';
+        toggleBtn.classList.remove('active');
+    }
+    
+    // Clear form when hiding
+    clearBulletinForm();
+}
+
+// Bulletin Creation Functions
+function postBulletin() {
+    const messageTextarea = document.getElementById('bulletin-message');
+    const postBtn = document.getElementById('post-bulletin-btn');
+    
+    if (!messageTextarea || !postBtn) {
+        console.error('Bulletin form elements not found');
+        return;
+    }
+    
+    const message = messageTextarea.value.trim();
+    
+    // Validation
+    if (message.length === 0) {
+        alert('Please enter a bulletin message.');
+        messageTextarea.focus();
+        return;
+    }
+    
+    if (message.length > 300) {
+        alert('Bulletin message is too long. Maximum 300 characters allowed.');
+        messageTextarea.focus();
+        return;
+    }
+    
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        alert('WebSocket connection not available. Cannot post bulletin.');
+        return;
+    }
+    
+    // Disable form during submission
+    postBtn.disabled = true;
+    postBtn.textContent = 'Posting...';
+    messageTextarea.disabled = true;
+    
+    console.log('Posting bulletin:', message);
+    
+    sendMessage({
+        type: 'create_bulletin',
+        message: message
+    });
+}
+
+function clearBulletinForm() {
+    const messageTextarea = document.getElementById('bulletin-message');
+    const charCount = document.getElementById('char-count');
+    
+    if (messageTextarea) {
+        messageTextarea.value = '';
+        messageTextarea.focus();
+    }
+    
+    if (charCount) {
+        charCount.textContent = '0';
+    }
+}
+
+function handleBulletinCreateResult(data) {
+    const { success, error, bulletin } = data;
+    const postBtn = document.getElementById('post-bulletin-btn');
+    const messageTextarea = document.getElementById('bulletin-message');
+    
+    // Re-enable form
+    if (postBtn) {
+        postBtn.disabled = false;
+        postBtn.textContent = 'Post Bulletin';
+    }
+    
+    if (messageTextarea) {
+        messageTextarea.disabled = false;
+    }
+    
+    if (success) {
+        console.log(`Successfully created bulletin ${bulletin.id}`);
+        // Clear the form
+        clearBulletinForm();
+        // Show success notification
+        showNotification(`Bulletin #${bulletin.id} posted successfully!`, 'success');
+        // The bulletin list will be automatically updated via WebSocket
+    } else {
+        console.error('Failed to create bulletin:', error);
+        alert(`Failed to post bulletin: ${error}`);
+        if (messageTextarea) {
+            messageTextarea.focus();
+        }
+    }
+}
+
+function updateCharacterCount() {
+    const messageTextarea = document.getElementById('bulletin-message');
+    const charCount = document.getElementById('char-count');
+    
+    if (messageTextarea && charCount) {
+        const currentLength = messageTextarea.value.length;
+        charCount.textContent = currentLength;
+        
+        // Update styling based on character count
+        if (currentLength > 280) {
+            charCount.style.color = '#dc3545'; // Red when approaching limit
+        } else if (currentLength > 250) {
+            charCount.style.color = '#ffc107'; // Yellow when getting close
+        } else {
+            charCount.style.color = '#333'; // Normal color
+        }
+    }
+}
+
+// Set up character counting when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    // Set up character counting
+    const messageTextarea = document.getElementById('bulletin-message');
+    if (messageTextarea) {
+        messageTextarea.addEventListener('input', updateCharacterCount);
+        messageTextarea.addEventListener('keyup', updateCharacterCount);
+        messageTextarea.addEventListener('paste', function() {
+            // Delay to allow paste to complete
+            setTimeout(updateCharacterCount, 10);
+        });
+        
+        // Initial count
+        updateCharacterCount();
+    }
+});
 
 // Handle window beforeunload
 window.addEventListener('beforeunload', function() {

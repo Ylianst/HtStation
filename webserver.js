@@ -182,6 +182,12 @@ class WebServer {
             case 'refresh_data':
                 this.sendAllData(ws);
                 break;
+            case 'delete_bulletin':
+                this.handleBulletinDeletion(ws, data);
+                break;
+            case 'create_bulletin':
+                this.handleBulletinCreation(ws, data);
+                break;
             default:
                 console.log('[WebServer] Unknown WebSocket message type:', data.type);
         }
@@ -455,6 +461,137 @@ class WebServer {
         
         // Also update the full message list
         this.sendAprsMessages();
+    }
+    
+    handleBulletinCreation(ws, data) {
+        console.log('[WebServer] Handling bulletin creation request:', data);
+        
+        if (!this.bbsServer || !this.bbsServer.bulletinStorage) {
+            this.sendResponse(ws, {
+                type: 'bulletin_create_result',
+                success: false,
+                error: 'Bulletin storage not available'
+            });
+            return;
+        }
+        
+        const { message } = data;
+        
+        if (!message || typeof message !== 'string') {
+            this.sendResponse(ws, {
+                type: 'bulletin_create_result',
+                success: false,
+                error: 'Bulletin message is required'
+            });
+            return;
+        }
+        
+        // Use station callsign for web-created bulletins
+        const stationCallsign = this.config.CALLSIGN;
+        
+        try {
+            // Create bulletin using BBS server's createBulletin method
+            const result = this.bbsServer.createBulletin(stationCallsign, message);
+            
+            if (result.success) {
+                console.log(`[WebServer] Web created bulletin ${result.bulletin.id} by ${stationCallsign}`);
+                
+                this.sendResponse(ws, {
+                    type: 'bulletin_create_result',
+                    success: true,
+                    bulletin: result.bulletin
+                });
+                
+                // Broadcast updated bulletin list to all clients
+                this.sendBulletins();
+            } else {
+                this.sendResponse(ws, {
+                    type: 'bulletin_create_result',
+                    success: false,
+                    error: result.error
+                });
+            }
+        } catch (error) {
+            console.error('[WebServer] Error creating bulletin:', error);
+            this.sendResponse(ws, {
+                type: 'bulletin_create_result',
+                success: false,
+                error: 'Internal error creating bulletin'
+            });
+        }
+    }
+    
+    handleBulletinDeletion(ws, data) {
+        console.log('[WebServer] Handling bulletin deletion request:', data);
+        
+        if (!this.bbsServer || !this.bbsServer.bulletinStorage) {
+            this.sendResponse(ws, {
+                type: 'bulletin_delete_result',
+                success: false,
+                error: 'Bulletin storage not available'
+            });
+            return;
+        }
+        
+        const { bulletinId } = data;
+        
+        if (!bulletinId) {
+            this.sendResponse(ws, {
+                type: 'bulletin_delete_result',
+                success: false,
+                error: 'Bulletin ID is required'
+            });
+            return;
+        }
+        
+        try {
+            // For web admin deletion, we'll delete as admin (bypass callsign check)
+            // First check if bulletin exists
+            const storageKey = `bulletin-${bulletinId}`;
+            const bulletin = this.bbsServer.bulletinStorage.load(storageKey);
+            
+            if (!bulletin) {
+                this.sendResponse(ws, {
+                    type: 'bulletin_delete_result',
+                    success: false,
+                    error: 'Bulletin not found'
+                });
+                return;
+            }
+            
+            // Admin can delete any bulletin from web interface
+            if (this.bbsServer.bulletinStorage.delete(storageKey)) {
+                console.log(`[WebServer] Admin deleted bulletin ${bulletinId} by ${bulletin.callsign}`);
+                
+                this.sendResponse(ws, {
+                    type: 'bulletin_delete_result',
+                    success: true,
+                    bulletinId: bulletinId
+                });
+                
+                // Broadcast updated bulletin list to all clients
+                this.sendBulletins();
+            } else {
+                this.sendResponse(ws, {
+                    type: 'bulletin_delete_result',
+                    success: false,
+                    error: 'Failed to delete bulletin'
+                });
+            }
+        } catch (error) {
+            console.error('[WebServer] Error deleting bulletin:', error);
+            this.sendResponse(ws, {
+                type: 'bulletin_delete_result',
+                success: false,
+                error: 'Internal error deleting bulletin'
+            });
+        }
+    }
+    
+    sendResponse(ws, data) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(data));
+        }
     }
     
     sendToClients(data, specificClient = null) {

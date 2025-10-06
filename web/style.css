@@ -178,6 +178,55 @@ body {
     font-size: 24px;
 }
 
+/* Section Header with Add Button */
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.section-header h2 {
+    margin-bottom: 0;
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.add-bulletin-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background-color: #28a745;
+    color: white;
+    border: 2px solid #28a745;
+    font-size: 24px;
+    font-weight: bold;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.add-bulletin-btn:hover {
+    background-color: #218838;
+    border-color: #1e7e34;
+    transform: scale(1.05);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+.add-bulletin-btn.active {
+    background-color: #dc3545;
+    border-color: #dc3545;
+    transform: rotate(45deg);
+}
+
+.add-bulletin-btn.active:hover {
+    background-color: #c82333;
+    border-color: #bd2130;
+}
+
 /* Overview Grid */
 .overview-grid {
     display: grid;
@@ -782,6 +831,7 @@ button:disabled {
 .bulletin-status {
     display: flex;
     align-items: center;
+    gap: 10px;
 }
 
 .days-remaining {
@@ -806,6 +856,30 @@ button:disabled {
 .bulletin-active .days-remaining {
     background-color: #28a745;
     color: white;
+}
+
+.delete-bulletin-btn {
+    background-color: #dc3545;
+    color: white;
+    border: 1px solid #dc3545;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.delete-bulletin-btn:hover {
+    background-color: #c82333;
+    border-color: #bd2130;
+}
+
+.delete-bulletin-btn:disabled {
+    background-color: #6c757d;
+    border-color: #6c757d;
+    cursor: not-allowed;
+    opacity: 0.6;
 }
 
 .bulletin-message {
@@ -850,6 +924,118 @@ button:disabled {
     margin-right: 5px;
 }
 
+/* Bulletin Creation Form Styles */
+.bulletin-create-form {
+    background-color: #f8f9fa;
+    border: 2px solid #0066cc;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    transition: all 0.3s ease;
+    transform-origin: top;
+}
+
+.bulletin-create-form h3 {
+    color: #0066cc;
+    margin-bottom: 15px;
+    font-size: 18px;
+    border-bottom: 1px solid #0066cc;
+    padding-bottom: 8px;
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    color: #333;
+    font-weight: bold;
+    font-size: 14px;
+}
+
+.bulletin-textarea {
+    width: 100%;
+    min-height: 100px;
+    padding: 10px;
+    border: 2px solid #dee2e6;
+    border-radius: 4px;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-size: 14px;
+    line-height: 1.4;
+    resize: vertical;
+    transition: border-color 0.3s ease;
+}
+
+.bulletin-textarea:focus {
+    outline: none;
+    border-color: #0066cc;
+    box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.2);
+}
+
+.bulletin-textarea:disabled {
+    background-color: #e9ecef;
+    cursor: not-allowed;
+}
+
+.char-counter {
+    text-align: right;
+    margin-top: 5px;
+    font-size: 12px;
+    color: #666;
+}
+
+.char-counter #char-count {
+    font-weight: bold;
+}
+
+.form-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-start;
+}
+
+.form-actions button {
+    padding: 8px 16px;
+    font-size: 14px;
+    font-weight: bold;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border: 2px solid;
+}
+
+#post-bulletin-btn {
+    background-color: #28a745;
+    color: white;
+    border-color: #28a745;
+}
+
+#post-bulletin-btn:hover {
+    background-color: #218838;
+    border-color: #1e7e34;
+}
+
+#post-bulletin-btn:disabled {
+    background-color: #6c757d;
+    border-color: #6c757d;
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+#clear-bulletin-btn {
+    background-color: #6c757d;
+    color: white;
+    border-color: #6c757d;
+}
+
+#clear-bulletin-btn:hover {
+    background-color: #5a6268;
+    border-color: #545b62;
+}
+
 /* Responsive bulletin design */
 @media (max-width: 768px) {
     .bulletin-header {
@@ -871,5 +1057,17 @@ button:disabled {
     .bulletin-message {
         font-size: 13px;
         padding: 8px;
+    }
+    
+    .bulletin-create-form {
+        padding: 15px;
+    }
+    
+    .form-actions {
+        flex-direction: column;
+    }
+    
+    .form-actions button {
+        width: 100%;
     }
 }

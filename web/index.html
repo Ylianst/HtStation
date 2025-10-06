@@ -131,7 +131,36 @@
 
             <!-- Active Bulletins View -->
             <div id="view-bulletins" class="content-view">
-                <h2>Active BBS Bulletins</h2>
+                <div class="section-header">
+                    <h2>Active BBS Bulletins</h2>
+                    <button id="toggle-create-btn" class="add-bulletin-btn" onclick="toggleBulletinForm()" title="Post New Bulletin">
+                        +
+                    </button>
+                </div>
+                
+                <!-- Bulletin Creation Form (hidden by default) -->
+                <div id="bulletin-create-form" class="bulletin-create-form" style="display: none;">
+                    <h3>Post New Bulletin</h3>
+                    <div class="form-group">
+                        <label for="bulletin-message">Message (300 characters max):</label>
+                        <textarea 
+                            id="bulletin-message" 
+                            class="bulletin-textarea" 
+                            placeholder="Enter your bulletin message here..."
+                            maxlength="300"
+                            rows="4"
+                        ></textarea>
+                        <div class="char-counter">
+                            <span id="char-count">0</span>/300 characters
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button id="post-bulletin-btn" onclick="postBulletin()">Post Bulletin</button>
+                        <button id="clear-bulletin-btn" onclick="clearBulletinForm()">Clear</button>
+                        <button id="cancel-bulletin-btn" onclick="hideBulletinForm()">Cancel</button>
+                    </div>
+                </div>
+                
                 <div id="bulletins" class="data-section">
                     <div class="loading">Loading...</div>
                 </div>

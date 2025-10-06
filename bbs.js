@@ -160,8 +160,17 @@ class BbsServer extends EventEmitter {
                 
                 // Process BBS commands
                 if (session.currentState === AX25Session.ConnectionState.CONNECTED) {
-                    const command = data.toString().trim().toLowerCase();
+                    const rawInput = data.toString().trim();
                     const currentMenu = this.sessionMenuStates.get(sessionKey) || 'main';
+                    
+                    // For bulletin creation, preserve original case
+                    let command;
+                    if (currentMenu === 'bulletin_create') {
+                        command = rawInput; // Preserve original case for bulletin content
+                    } else {
+                        command = rawInput.toLowerCase(); // Convert to lowercase for commands
+                    }
+                    
                     let response = this.processCommand(sessionKey, command, currentMenu);
                     
                     if (response) {
@@ -736,7 +745,7 @@ class BbsServer extends EventEmitter {
     processBulletinCreate(sessionKey, input) {
         const callsign = sessionKey.split('-')[0]; // Extract callsign without SSID
         
-        if (input.toLowerCase() === 'main') {
+        if (input.trim().toLowerCase() === 'main') {
             this.sessionMenuStates.set(sessionKey, 'main');
             return this.getMainMenu();
         }
