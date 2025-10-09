@@ -47,6 +47,12 @@ class WebServer {
                 // Create WebSocket server
                 this.wsServer = new WebSocket.Server({ server: this.httpServer });
                 
+                // Handle WebSocket server errors
+                this.wsServer.on('error', (error) => {
+                    //console.error('[WebServer] WebSocket server error:', error);
+                    reject(error);
+                });
+                
                 // Handle WebSocket connections
                 this.wsServer.on('connection', (ws, req) => {
                     console.log(`[WebServer] New WebSocket connection from ${req.socket.remoteAddress}`);
@@ -83,7 +89,7 @@ class WebServer {
                 });
                 
                 this.httpServer.on('error', (error) => {
-                    console.error('[WebServer] HTTP server error:', error);
+                    //console.error('[WebServer] HTTP server error:', error);
                     reject(error);
                 });
                 

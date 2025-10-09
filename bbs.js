@@ -384,7 +384,7 @@ class BbsServer extends EventEmitter {
     
     getLastConnections() {
         if (!this.storage) {
-            return `Connection logging not available.\r\n\r\n`;
+            return `Connection logging not available.\r\n`;
         }
         
         try {
@@ -396,7 +396,7 @@ class BbsServer extends EventEmitter {
             const recentKeys = connectionKeys.slice(0, 20);
             
             if (recentKeys.length === 0) {
-                return `No connections recorded yet.\r\n\r\n`;
+                return `No connections recorded yet.\r\n`;
             }
             
             // Load the connection records
@@ -419,12 +419,12 @@ class BbsServer extends EventEmitter {
                 output += `${callsign}  ${conn.localTime}\r\n`;
             }
             
-            output += `\r\nTotal: ${connections.length} connection${connections.length !== 1 ? 's' : ''}\r\n\r\n`;
+            output += `\r\nTotal: ${connections.length} connection${connections.length !== 1 ? 's' : ''}\r\n`;
             
             return output;
         } catch (error) {
             console.error('[BBS Server] Error retrieving last connections:', error);
-            return `Error retrieving connection history.\r\n\r\n`;
+            return `Error retrieving connection history.\r\n`;
         }
     }
     
@@ -442,7 +442,7 @@ class BbsServer extends EventEmitter {
             const recentKeys = messageKeys.slice(0, 20);
             
             if (recentKeys.length === 0) {
-                return `No APRS messages recorded yet.\r\n\r\n`;
+                return `No APRS messages recorded yet.\r\n`;
             }
             
             // Load the message records
@@ -686,7 +686,7 @@ class BbsServer extends EventEmitter {
             }
         });
         
-        output += `\r\nTotal: ${bulletins.length} bulletin${bulletins.length !== 1 ? 's' : ''}\r\n\r\n`;
+        output += `\r\nTotal: ${bulletins.length} bulletin${bulletins.length !== 1 ? 's' : ''}\r\n`;
         
         return output;
     }
@@ -766,11 +766,11 @@ class BbsServer extends EventEmitter {
             this.sessionMenuStates.set(sessionKey, 'main');
             return `Bulletin posted successfully!\r\n` +
                    `Bulletin ID: ${result.bulletin.id}\r\n` +
-                   `Expires: ${result.bulletin.expireTimeLocal}\r\n\r\n` +
+                   `Expires: ${result.bulletin.expireTimeLocal}\r\n` +
                    this.getMainMenu();
         } else {
             this.sessionMenuStates.set(sessionKey, 'main');
-            return `Error posting bulletin: ${result.error}\r\n\r\n` + this.getMainMenu();
+            return `Error posting bulletin: ${result.error}\r\n` + this.getMainMenu();
         }
     }
     
@@ -786,7 +786,7 @@ class BbsServer extends EventEmitter {
         
         if (userBulletins.length === 0) {
             this.sessionMenuStates.set(sessionKey, 'main');
-            return `You have no bulletins to delete.\r\n\r\n` + this.getMainMenu();
+            return `You have no bulletins to delete.\r\n` + this.getMainMenu();
         }
         
         const bulletinNumber = parseInt(input.trim());
@@ -800,10 +800,10 @@ class BbsServer extends EventEmitter {
         
         if (result.success) {
             this.sessionMenuStates.set(sessionKey, 'main');
-            return `Bulletin deleted successfully!\r\n\r\n` + this.getMainMenu();
+            return `Bulletin deleted successfully!\r\n` + this.getMainMenu();
         } else {
             this.sessionMenuStates.set(sessionKey, 'main');
-            return `Error deleting bulletin: ${result.error}\r\n\r\n` + this.getMainMenu();
+            return `Error deleting bulletin: ${result.error}\r\n` + this.getMainMenu();
         }
     }
     
@@ -999,8 +999,7 @@ class BbsServer extends EventEmitter {
         
         return `Current Time:\r\n` +
                `Local: ${localTime} (${timeZone})\r\n` +
-               `UTC:   ${utcTime}\r\n` +
-               `\r\n`;
+               `UTC:   ${utcTime}\r\n`;
     }
     
     getSystemUptime() {
@@ -1021,8 +1020,7 @@ class BbsServer extends EventEmitter {
         
         return `System Uptime:\r\n` +
                `${uptimeStr}\r\n` +
-               `Load Average: ${loadAvg[0].toFixed(2)}, ${loadAvg[1].toFixed(2)}, ${loadAvg[2].toFixed(2)}\r\n` +
-               `\r\n`;
+               `Load Average: ${loadAvg[0].toFixed(2)}, ${loadAvg[1].toFixed(2)}, ${loadAvg[2].toFixed(2)}\r\n`;
     }
     
     // Cleanup method for proper shutdown

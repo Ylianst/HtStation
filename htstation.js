@@ -117,12 +117,36 @@ if (config.WEBSERVERPORT) {
                     console.log(`[App] Web server started successfully on port ${webServerPort}`);
                 })
                 .catch((error) => {
-                    console.error('[App] Failed to start web server:', error.message);
+                    // Check if the error is due to port already being in use
+                    if (error.code === 'EADDRINUSE') {
+                        console.error(`[App] ❌ Web server failed to start: Port ${webServerPort} is already in use.`);
+                        console.error(`[App] 💡 To fix this issue:`);
+                        console.error(`[App]    • Stop the application or service using port ${webServerPort}`);
+                        console.error(`[App]    • Or change WEBSERVERPORT in config.ini to a different port number`);
+                        console.error(`[App]    • Available ports are typically: 3000, 8080, 8090, 9000, etc.`);
+                    } else if (error.code === 'EACCES') {
+                        console.error(`[App] ❌ Web server failed to start: Permission denied for port ${webServerPort}.`);
+                        console.error(`[App] 💡 To fix this issue:`);
+                        console.error(`[App]    • Use a port number above 1024 (non-privileged ports)`);
+                        console.error(`[App]    • Or run the application with administrator/root privileges`);
+                    } else {
+                        console.error(`[App] ❌ Web server failed to start: ${error.message}`);
+                        console.error(`[App] 💡 Error details: ${error.code || 'Unknown error code'}`);
+                    }
+                    console.error(`[App] ⚠️  The application will continue running without the web interface.`);
                     webServer = null;
+                    
+                    // Exit gracefully with a user-friendly message
+                    setTimeout(() => {
+                        console.error(`[App] 🛑 Exiting application due to web server startup failure.`);
+                        process.exit(1);
+                    }, 1000);
                 });
         } catch (error) {
-            console.error('[App] Web server initialization failed:', error.message);
+            console.error(`[App] ❌ Web server initialization failed: ${error.message}`);
+            console.error(`[App] 🛑 Exiting application due to web server initialization failure.`);
             webServer = null;
+            process.exit(1);
         }
     } else {
         console.log('[App] Web server disabled (WEBSERVERPORT is 0)');
