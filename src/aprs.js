@@ -1,7 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
-const { AprsPacket } = require('./aprs/index.js');
+const { AprsPacket } = require('../aprs/index.js');
 const Storage = require('./storage');
 
 class AprsHandler {
