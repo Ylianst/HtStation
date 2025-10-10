@@ -20,7 +20,7 @@ class YappTransfer extends EventEmitter {
         this.session = session;
         this.config = {
             maxRetries: config.maxRetries || 3,
-            timeout: config.timeout || 30000, // 30 seconds
+            timeout: config.timeout || 60000, // 60 seconds
             blockSize: config.blockSize || 128,
             useChecksum: config.useChecksum !== false, // Default to true for YappC
             enableResume: config.enableResume !== false, // Default to true
@@ -548,9 +548,15 @@ class YappTransfer extends EventEmitter {
     }
     
     processReceiveModePacket(data, type) {
+        const subtype = data.length > 1 ? data[1] : null;
+        
         switch (this.state) {
             case 'R': // Receive Init state
-                if (type === this.CONTROL.SOH) { // HD
+                if (type === this.CONTROL.ENQ && subtype === 0x01) { // SI
+                    // Sender is initiating - respond with RR
+                    console.log('[YAPP] Received SI in receive mode, sending RR');
+                    this.sendRR();
+                } else if (type === this.CONTROL.SOH) { // HD
                     this.handleHeader(data);
                 } else if (type === this.CONTROL.EOT) { // ET
                     console.log('[YAPP] Received EOT in receive init, sending AT');
@@ -571,6 +577,8 @@ class YappTransfer extends EventEmitter {
             case 'RD': // Receive Data state
                 if (type === this.CONTROL.STX) { // DT
                     this.handleDataPacket(data);
+                    // Send empty ACK to request more data
+                    this.sendPacket(Buffer.from([this.CONTROL.ACK]));
                 } else if (type === this.CONTROL.ETX) { // EF
                     this.handleEndOfFile();
                 } else if (type === this.CONTROL.CAN) { // CN

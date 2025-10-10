@@ -164,7 +164,15 @@ class BbsServer extends EventEmitter {
                     timestamp: new Date().toISOString()
                 });
                 
-                // Process BBS commands
+                // Check if YAPP file transfer is active for this session
+                const activeTransfer = this.fileTransfers.get(sessionKey);
+                if (activeTransfer && activeTransfer.state !== 'IDLE') {
+                    console.log(`[BBS Session] YAPP transfer active for ${sessionKey}, skipping normal BBS command processing`);
+                    // YAPP module will handle the data through its own handleIncomingData method
+                    return;
+                }
+                
+                // Process BBS commands only if no YAPP transfer is active
                 if (session.currentState === AX25Session.ConnectionState.CONNECTED) {
                     const rawInput = data.toString().trim();
                     const currentMenu = this.sessionMenuStates.get(sessionKey) || 'main';
@@ -1231,10 +1239,14 @@ class BbsServer extends EventEmitter {
             // Start the transfer
             yappTransfer.startSend(selectedFile.path, selectedFile.name);
             
+            return ''; // Just start the transfer, no user messages since this could interfere with the protocol.
+
+            /*
             return `Starting YAPP download of: ${selectedFile.name}\r\n` +
                    `Size: ${this.formatFileSize(selectedFile.size)}\r\n` +
                    `Please ensure your terminal supports YAPP protocol.\r\n` +
                    `Transfer will begin shortly...\r\n`;
+            */
             
         } catch (error) {
             console.error(`[BBS YAPP] Error starting file transfer for ${sessionKey}:`, error);
@@ -1326,12 +1338,15 @@ class BbsServer extends EventEmitter {
             // Start the transfer
             yappTransfer.startSend(selectedFile.path, selectedFile.name);
             
+            return ''; // Just start the transfer, no user messages since this could interfere with the protocol.
+
+            /*
             return `Starting YAPP download of: ${selectedFile.name}\r\n` +
                    `Size: ${this.formatFileSize(selectedFile.size)}\r\n` +
                    `Category: ${selectedFile.category === 'root' ? 'main' : selectedFile.category}\r\n` +
                    `Please ensure your terminal supports YAPP protocol.\r\n` +
                    `Transfer will begin shortly...\r\n`;
-            
+            */
         } catch (error) {
             console.error(`[BBS YAPP] Error starting file transfer for ${sessionKey}:`, error);
             return `Error starting file transfer: ${error.message}\r\n` + this.getMainMenu();
