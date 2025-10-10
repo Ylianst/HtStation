@@ -10,6 +10,7 @@ const os = require('os');
 const GuessTheNumberGame = require('./games-guess');
 const BlackjackGame = require('./games-blackjack');
 const JokeGame = require('./games-joke');
+const YappTransfer = require('./yapp');
 
 class BbsServer extends EventEmitter {
     constructor(config, radio) {
@@ -55,6 +56,11 @@ class BbsServer extends EventEmitter {
             console.error('[BBS Server] Failed to initialize bulletin storage:', error);
             this.bulletinStorage = null;
         }
+        
+        // === File Transfer Management ===
+        this.fileTransfers = new Map(); // Map of session keys to YAPP transfer instances
+        this.pubFilesPath = './pubfiles';
+        this.initializeFileSystem();
     }
     
     // Initialize available games
@@ -841,6 +847,9 @@ class BbsServer extends EventEmitter {
             case 'bulletin_delete':
                 response = this.processBulletinDelete(sessionKey, command);
                 break;
+            case 'files':
+                response = this.processFilesCommand(sessionKey, command);
+                break;
             case 'guess_number':
             case 'blackjack':
             case 'joke':
@@ -903,12 +912,24 @@ class BbsServer extends EventEmitter {
                 // Switch to bulletin deletion mode
                 this.sessionMenuStates.set(sessionKey, 'bulletin_delete');
                 return this.getBulletinDeletePrompt(sessionKey);
+            case 'f':
+            case 'files':
+                // Show files list without switching menu state
+                return this.getFilesDisplay();
             case 'g':
             case 'games':
                 // Switch to games menu
                 this.sessionMenuStates.set(sessionKey, 'games');
                 return this.getGamesMenu();
             default:
+                // Check if it's a download command
+                if (command.startsWith('download ')) {
+                    const filename = command.substring(9).trim(); // Remove "download " prefix
+                    if (filename.length === 0) {
+                        return `Please specify a filename. Usage: DOWNLOAD <filename>\r\n`;
+                    }
+                    return this.startFileDownloadByName(sessionKey, filename);
+                }
                 return `Unknown command: ${command}\r\nType 'M' or 'MENU' for help.\r\n`;
         }
     }
@@ -951,6 +972,7 @@ class BbsServer extends EventEmitter {
                `[B]ULL    - View active bulletins\r\n` +
                `NEWB      - Post new bulletin\r\n` +
                `DELB      - Delete your bulletin\r\n` +
+               `[F]ILES   - Browse and download files\r\n` +
                `[G]AMES   - Games submenu\r\n` +
                `BYE       - Disconnect from BBS\r\n`;
     }
@@ -1023,9 +1045,324 @@ class BbsServer extends EventEmitter {
                `Load Average: ${loadAvg[0].toFixed(2)}, ${loadAvg[1].toFixed(2)}, ${loadAvg[2].toFixed(2)}\r\n`;
     }
     
+    // === File Transfer and Management Methods ===
+    
+    initializeFileSystem() {
+        const fs = require('fs');
+        const path = require('path');
+        
+        try {
+            // Ensure pubfiles directory exists
+            if (!fs.existsSync(this.pubFilesPath)) {
+                fs.mkdirSync(this.pubFilesPath, { recursive: true });
+                console.log(`[BBS Files] Created pubfiles directory: ${this.pubFilesPath}`);
+            }
+            
+            console.log(`[BBS Files] File system initialized - pubfiles path: ${this.pubFilesPath}`);
+        } catch (error) {
+            console.error('[BBS Files] Error initializing file system:', error);
+        }
+    }
+    
+    getAvailableFiles() {
+        const fs = require('fs');
+        const path = require('path');
+        
+        try {
+            const files = [];
+            
+            // Recursively scan the pubfiles directory
+            const scanDirectory = (dir, relativePath = '') => {
+                const items = fs.readdirSync(dir);
+                
+                for (const item of items) {
+                    const fullPath = path.join(dir, item);
+                    const stats = fs.statSync(fullPath);
+                    
+                    if (stats.isFile()) {
+                        const relativeFilePath = path.join(relativePath, item);
+                        files.push({
+                            name: item,
+                            path: fullPath,
+                            relativePath: relativeFilePath,
+                            size: stats.size,
+                            modified: stats.mtime,
+                            category: relativePath || 'root'
+                        });
+                    } else if (stats.isDirectory() && item !== '.' && item !== '..') {
+                        scanDirectory(fullPath, path.join(relativePath, item));
+                    }
+                }
+            };
+            
+            scanDirectory(this.pubFilesPath);
+            
+            // Sort files by category then by name
+            files.sort((a, b) => {
+                if (a.category !== b.category) {
+                    return a.category.localeCompare(b.category);
+                }
+                return a.name.localeCompare(b.name);
+            });
+            
+            return files;
+        } catch (error) {
+            console.error('[BBS Files] Error scanning files:', error);
+            return [];
+        }
+    }
+    
+    getFilesDisplay() {
+        const files = this.getAvailableFiles();
+        
+        if (files.length === 0) {
+            return `${this.RADIO_CALLSIGN} BBS - Available Files\r\n` +
+                   `=============================\r\n` +
+                   `No files available for download.\r\n` +
+                   `Use: DOWNLOAD <filename> to download a file\r\n\r\n`;
+        }
+        
+        let output = `${this.RADIO_CALLSIGN} BBS - Available Files\r\n`;
+        output += `=============================\r\n`;
+        output += `Name                    Size     Category\r\n`;
+        output += `----                    ----     --------\r\n`;
+        
+        files.forEach((file) => {
+            const name = file.name.length > 20 ? file.name.substring(0, 17) + '...' : file.name.padEnd(20);
+            const size = this.formatFileSize(file.size).padEnd(8);
+            const category = file.category === 'root' ? 'main' : file.category;
+            
+            output += `${name}  ${size}  ${category}\r\n`;
+        });
+        
+        output += `\r\nTotal: ${files.length} file${files.length !== 1 ? 's' : ''}\r\n`;
+        output += `Use: DOWNLOAD <filename> to download a file\r\n\r\n`;
+        
+        return output;
+    }
+    
+    formatFileSize(bytes) {
+        if (bytes < 1024) {
+            return `${bytes} B`;
+        } else if (bytes < 1024 * 1024) {
+            return `${Math.round(bytes / 1024)} KB`;
+        } else {
+            return `${Math.round(bytes / (1024 * 1024))} MB`;
+        }
+    }
+    
+    startFileDownload(sessionKey, fileNumber) {
+        const files = this.getAvailableFiles();
+        
+        if (fileNumber < 1 || fileNumber > files.length) {
+            return `Invalid file number. Please enter 1-${files.length} or 'MAIN':\r\n`;
+        }
+        
+        const selectedFile = files[fileNumber - 1];
+        const session = this.activeSessions.get(sessionKey);
+        
+        if (!session) {
+            return `Session not found. Please try again.\r\n`;
+        }
+        
+        // Check if there's already a transfer in progress for this session
+        if (this.fileTransfers.has(sessionKey)) {
+            const existingTransfer = this.fileTransfers.get(sessionKey);
+            if (existingTransfer.state !== 'IDLE') {
+                return `File transfer already in progress. Please wait for it to complete.\r\n`;
+            }
+        }
+        
+        try {
+            // Create YAPP transfer instance
+            const yappTransfer = new YappTransfer(session, {
+                maxRetries: 3,
+                timeout: 30000,
+                blockSize: 128,
+                useChecksum: true,
+                enableResume: true
+            });
+            
+            // Set up transfer event handlers
+            yappTransfer.on('transferStarted', (info) => {
+                console.log(`[BBS YAPP] Transfer started for ${sessionKey}: ${info.filename}`);
+            });
+            
+            yappTransfer.on('transferProgress', (progress) => {
+                console.log(`[BBS YAPP] Transfer progress for ${sessionKey}: ${progress.percentage}% (${progress.bytesTransferred}/${progress.fileSize} bytes)`);
+            });
+            
+            yappTransfer.on('transferCompleted', (stats) => {
+                console.log(`[BBS YAPP] Transfer completed for ${sessionKey}: ${stats.filename} (${stats.bytesTransferred} bytes in ${stats.elapsedTime}s)`);
+                this.fileTransfers.delete(sessionKey);
+                
+                // Send completion message
+                const completionMsg = `\r\nFile transfer completed successfully!\r\n` +
+                                    `File: ${stats.filename}\r\n` +
+                                    `Size: ${this.formatFileSize(stats.bytesTransferred)}\r\n` +
+                                    `Time: ${Math.round(stats.elapsedTime)}s\r\n` +
+                                    this.getMainMenu();
+                
+                session.send(Buffer.from(completionMsg), true);
+                this.sessionMenuStates.set(sessionKey, 'main');
+            });
+            
+            yappTransfer.on('transferCancelled', (info) => {
+                console.log(`[BBS YAPP] Transfer cancelled for ${sessionKey}: ${info.reason}`);
+                this.fileTransfers.delete(sessionKey);
+                
+                const cancelMsg = `\r\nFile transfer cancelled: ${info.reason}\r\n` + this.getMainMenu();
+                session.send(Buffer.from(cancelMsg), true);
+                this.sessionMenuStates.set(sessionKey, 'main');
+            });
+            
+            yappTransfer.on('transferAborted', (info) => {
+                console.log(`[BBS YAPP] Transfer aborted for ${sessionKey}: ${info.reason}`);
+                this.fileTransfers.delete(sessionKey);
+                
+                const abortMsg = `\r\nFile transfer aborted: ${info.reason}\r\n` + this.getMainMenu();
+                session.send(Buffer.from(abortMsg), true);
+                this.sessionMenuStates.set(sessionKey, 'main');
+            });
+            
+            // Store the transfer instance
+            this.fileTransfers.set(sessionKey, yappTransfer);
+            
+            // Start the transfer
+            yappTransfer.startSend(selectedFile.path, selectedFile.name);
+            
+            return `Starting YAPP download of: ${selectedFile.name}\r\n` +
+                   `Size: ${this.formatFileSize(selectedFile.size)}\r\n` +
+                   `Please ensure your terminal supports YAPP protocol.\r\n` +
+                   `Transfer will begin shortly...\r\n`;
+            
+        } catch (error) {
+            console.error(`[BBS YAPP] Error starting file transfer for ${sessionKey}:`, error);
+            return `Error starting file transfer: ${error.message}\r\n` + this.getMainMenu();
+        }
+    }
+    
+    startFileDownloadByName(sessionKey, filename) {
+        const files = this.getAvailableFiles();
+        
+        // Find file by exact name match (case insensitive)
+        const selectedFile = files.find(file => 
+            file.name.toLowerCase() === filename.toLowerCase()
+        );
+        
+        if (!selectedFile) {
+            return `File '${filename}' not found. Use FILES command to see available files.\r\n`;
+        }
+        
+        const session = this.activeSessions.get(sessionKey);
+        
+        if (!session) {
+            return `Session not found. Please try again.\r\n`;
+        }
+        
+        // Check if there's already a transfer in progress for this session
+        if (this.fileTransfers.has(sessionKey)) {
+            const existingTransfer = this.fileTransfers.get(sessionKey);
+            if (existingTransfer.state !== 'IDLE') {
+                return `File transfer already in progress. Please wait for it to complete.\r\n`;
+            }
+        }
+        
+        try {
+            // Create YAPP transfer instance
+            const yappTransfer = new YappTransfer(session, {
+                maxRetries: 3,
+                timeout: 30000,
+                blockSize: 128,
+                useChecksum: true,
+                enableResume: true
+            });
+            
+            // Set up transfer event handlers
+            yappTransfer.on('transferStarted', (info) => {
+                console.log(`[BBS YAPP] Transfer started for ${sessionKey}: ${info.filename}`);
+            });
+            
+            yappTransfer.on('transferProgress', (progress) => {
+                console.log(`[BBS YAPP] Transfer progress for ${sessionKey}: ${progress.percentage}% (${progress.bytesTransferred}/${progress.fileSize} bytes)`);
+            });
+            
+            yappTransfer.on('transferCompleted', (stats) => {
+                console.log(`[BBS YAPP] Transfer completed for ${sessionKey}: ${stats.filename} (${stats.bytesTransferred} bytes in ${stats.elapsedTime}s)`);
+                this.fileTransfers.delete(sessionKey);
+                
+                // Send completion message
+                const completionMsg = `\r\nFile transfer completed successfully!\r\n` +
+                                    `File: ${stats.filename}\r\n` +
+                                    `Size: ${this.formatFileSize(stats.bytesTransferred)}\r\n` +
+                                    `Time: ${Math.round(stats.elapsedTime)}s\r\n` +
+                                    this.getMainMenu();
+                
+                session.send(Buffer.from(completionMsg), true);
+                this.sessionMenuStates.set(sessionKey, 'main');
+            });
+            
+            yappTransfer.on('transferCancelled', (info) => {
+                console.log(`[BBS YAPP] Transfer cancelled for ${sessionKey}: ${info.reason}`);
+                this.fileTransfers.delete(sessionKey);
+                
+                const cancelMsg = `\r\nFile transfer cancelled: ${info.reason}\r\n` + this.getMainMenu();
+                session.send(Buffer.from(cancelMsg), true);
+                this.sessionMenuStates.set(sessionKey, 'main');
+            });
+            
+            yappTransfer.on('transferAborted', (info) => {
+                console.log(`[BBS YAPP] Transfer aborted for ${sessionKey}: ${info.reason}`);
+                this.fileTransfers.delete(sessionKey);
+                
+                const abortMsg = `\r\nFile transfer aborted: ${info.reason}\r\n` + this.getMainMenu();
+                session.send(Buffer.from(abortMsg), true);
+                this.sessionMenuStates.set(sessionKey, 'main');
+            });
+            
+            // Store the transfer instance
+            this.fileTransfers.set(sessionKey, yappTransfer);
+            
+            // Start the transfer
+            yappTransfer.startSend(selectedFile.path, selectedFile.name);
+            
+            return `Starting YAPP download of: ${selectedFile.name}\r\n` +
+                   `Size: ${this.formatFileSize(selectedFile.size)}\r\n` +
+                   `Category: ${selectedFile.category === 'root' ? 'main' : selectedFile.category}\r\n` +
+                   `Please ensure your terminal supports YAPP protocol.\r\n` +
+                   `Transfer will begin shortly...\r\n`;
+            
+        } catch (error) {
+            console.error(`[BBS YAPP] Error starting file transfer for ${sessionKey}:`, error);
+            return `Error starting file transfer: ${error.message}\r\n` + this.getMainMenu();
+        }
+    }
+    
+    processFilesCommand(sessionKey, command) {
+        if (command.toLowerCase() === 'main') {
+            this.sessionMenuStates.set(sessionKey, 'main');
+            return this.getMainMenu();
+        }
+        
+        // Check if it's a file number
+        const fileNumber = parseInt(command.trim());
+        if (!isNaN(fileNumber)) {
+            return this.startFileDownload(sessionKey, fileNumber);
+        }
+        
+        return `Invalid input. Please enter a file number or 'MAIN':\r\n`;
+    }
+    
     // Cleanup method for proper shutdown
     close() {
         try {
+            // Cancel any active file transfers
+            for (const [sessionKey, transfer] of this.fileTransfers) {
+                console.log(`[BBS Server] Cancelling file transfer for ${sessionKey}`);
+                transfer.cancel('BBS shutting down');
+            }
+            this.fileTransfers.clear();
+            
             // Close all active sessions
             for (const [sessionKey, session] of this.activeSessions) {
                 console.log(`[BBS Server] Closing session for ${sessionKey}`);
