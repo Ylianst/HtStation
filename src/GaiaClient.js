@@ -75,7 +75,7 @@ class GaiaClient {
                 console.log('Attempting to connect...');
 
                 this.btSerial.connect(this.macAddress, channel, () => {
-                    console.log('Successfully connected to the radio!');
+                    console.log('Successfully connected to the radio.');
                     this._setupListeners();
                     this.onConnectionStatusChanged(true);
                     resolve();

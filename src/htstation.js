@@ -195,8 +195,6 @@ radio.on('disconnected', () => {
 // Attempt to connect to the radio
 radio.connect(RADIO_MAC_ADDRESS)
     .then(() => {
-        console.log('Successfully connected to radio!');
-
         // Publish Home Assistant MQTT Discovery configs
         if (mqttReporter && config.MQTT_TOPIC) {
             mqttReporter.publishAllDiscoveryConfigs();
