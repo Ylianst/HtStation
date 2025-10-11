@@ -1205,8 +1205,8 @@ class BbsServer extends EventEmitter {
                 this.fileTransfers.delete(sessionKey);
                 
                 // Send completion message
-                const completionMsg = `File transfer completed successfully.\r\n` +
-                                    `File: ${stats.filename}, Size: ${this.formatFileSize(stats.bytesTransferred)}\r\n`;
+                const completionMsg = `File transfer completed.\r\n` +
+                                    `File: ${stats.filename}, Size: ${this.formatFileSize(stats.bytesTransferred)}\r\n[M] for menu.\r\n`;
                 
                 session.send(Buffer.from(completionMsg), true);
                 this.sessionMenuStates.set(sessionKey, 'main');
@@ -1301,8 +1301,8 @@ class BbsServer extends EventEmitter {
                 this.fileTransfers.delete(sessionKey);
                 
                 // Send completion message
-                const completionMsg = `File transfer completed successfully.\r\n` +
-                                    `File: ${stats.filename}, Size: ${this.formatFileSize(stats.bytesTransferred)}\r\n`;
+                const completionMsg = `File transfer completed.\r\n` +
+                                    `File: ${stats.filename}, Size: ${this.formatFileSize(stats.bytesTransferred)}\r\n[M] for menu.\r\n`;
                 
                 session.send(Buffer.from(completionMsg), true);
                 this.sessionMenuStates.set(sessionKey, 'main');
