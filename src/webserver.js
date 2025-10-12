@@ -227,15 +227,93 @@ class WebServer {
         const uptimeMs = now.getTime() - this.startTime.getTime();
         const systemUptimeSeconds = os.uptime();
         
+        // Get last BBS activity timestamp
+        let lastBbsActivity = null;
+        if (this.bbsServer && this.bbsServer.storage) {
+            try {
+                const connectionKeys = this.bbsServer.storage.list('connection-%');
+                if (connectionKeys.length > 0) {
+                    connectionKeys.sort().reverse();
+                    const lastConnection = this.bbsServer.storage.load(connectionKeys[0]);
+                    if (lastConnection && lastConnection.timestamp) {
+                        lastBbsActivity = lastConnection.timestamp;
+                    }
+                }
+            } catch (error) {
+                console.error('[WebServer] Error getting last BBS activity:', error);
+            }
+        }
+        
+        // Get last APRS message timestamp and counts
+        let lastAprsMessage = null;
+        let aprsMessageCount = 0;
+        let aprsStationsCount = 0;
+        if (this.bbsServer && this.bbsServer.aprsMessageStorage) {
+            try {
+                const messageKeys = this.bbsServer.aprsMessageStorage.list('aprs-msg-%');
+                aprsMessageCount = messageKeys.length;
+                
+                if (messageKeys.length > 0) {
+                    messageKeys.sort().reverse();
+                    const lastMessage = this.bbsServer.aprsMessageStorage.load(messageKeys[0]);
+                    if (lastMessage && lastMessage.timestamp) {
+                        lastAprsMessage = lastMessage.timestamp;
+                    }
+                    
+                    // Count unique stations
+                    const uniqueStations = new Set();
+                    for (const key of messageKeys) {
+                        const msg = this.bbsServer.aprsMessageStorage.load(key);
+                        if (msg && msg.source) {
+                            uniqueStations.add(msg.source);
+                        }
+                    }
+                    aprsStationsCount = uniqueStations.size;
+                }
+            } catch (error) {
+                console.error('[WebServer] Error getting APRS data:', error);
+            }
+        }
+        
+        // Get bulletin count
+        let bulletinCount = 0;
+        if (this.bbsServer && this.bbsServer.bulletinStorage) {
+            try {
+                const bulletins = this.bbsServer.getAllActiveBulletins();
+                bulletinCount = bulletins.length;
+            } catch (error) {
+                console.error('[WebServer] Error getting bulletin count:', error);
+            }
+        }
+        
+        // Get BBS total connections count
+        let bbsTotalConnections = 0;
+        if (this.bbsServer && this.bbsServer.storage) {
+            try {
+                const connectionKeys = this.bbsServer.storage.list('connection-%');
+                bbsTotalConnections = connectionKeys.length;
+            } catch (error) {
+                console.error('[WebServer] Error getting BBS connection count:', error);
+            }
+        }
+        
         const data = {
             type: this.EVENT_TYPES.SYSTEM_STATUS,
             timestamp: now.toISOString(),
             callsign: this.config.CALLSIGN,
             stationId: this.config.STATIONID,
+            bbsStationId: this.config.BBS_STATION_ID,
+            winlinkStationId: this.config.WINLINK_STATION_ID,
             radioConnected: this.radio ? (this.radio.state === 3) : false, // RadioState.CONNECTED = 3
             appUptime: this.formatUptime(uptimeMs / 1000),
             systemUptime: this.formatUptime(systemUptimeSeconds),
-            activeConnections: this.bbsServer ? this.bbsServer.activeSessions.size : 0
+            activeConnections: this.bbsServer ? this.bbsServer.activeSessions.size : 0,
+            lastBbsActivity: lastBbsActivity,
+            lastAprsMessage: lastAprsMessage,
+            aprsMessageCount: aprsMessageCount,
+            aprsStationsCount: aprsStationsCount,
+            bulletinCount: bulletinCount,
+            bbsTotalConnections: bbsTotalConnections
         };
         
         this.sendToClients(data, ws);
@@ -321,7 +399,10 @@ class WebServer {
         
         if (!this.winlinkServer) {
             console.log('[WebServer] No WinLink server available');
-            return { inbox: [], outbox: [], draft: [], sent: [], archive: [], trash: [] };
+            return { 
+                inbox: [], outbox: [], draft: [], sent: [], archive: [], trash: [],
+                inboxSize: 0, outboxSize: 0, draftSize: 0, sentSize: 0, archiveSize: 0, trashSize: 0
+            };
         }
         
         try {
@@ -336,7 +417,22 @@ class WebServer {
             const archive = [];
             const trash = [];
             
+            // Track sizes
+            let inboxSize = 0;
+            let outboxSize = 0;
+            let draftSize = 0;
+            let sentSize = 0;
+            let archiveSize = 0;
+            let trashSize = 0;
+            
             for (const mail of allMails) {
+                // Calculate mail size (approximate)
+                const mailSize = (mail.from || '').length + 
+                               (mail.to || '').length + 
+                               (mail.cc || '').length + 
+                               (mail.subject || '').length + 
+                               (mail.body || '').length;
+                
                 const mailData = {
                     mid: mail.mid,
                     from: mail.from,
@@ -354,16 +450,22 @@ class WebServer {
                 // Mailbox values: 0=inbox, 1=outbox, 2=draft, 3=sent, 4=archive, 5=trash
                 if (mail.mailbox === 0) {
                     inbox.push(mailData);
+                    inboxSize += mailSize;
                 } else if (mail.mailbox === 1) {
                     outbox.push(mailData);
+                    outboxSize += mailSize;
                 } else if (mail.mailbox === 2) {
                     draft.push(mailData);
+                    draftSize += mailSize;
                 } else if (mail.mailbox === 3) {
                     sent.push(mailData);
+                    sentSize += mailSize;
                 } else if (mail.mailbox === 4) {
                     archive.push(mailData);
+                    archiveSize += mailSize;
                 } else if (mail.mailbox === 5) {
                     trash.push(mailData);
+                    trashSize += mailSize;
                 }
             }
             
@@ -376,12 +478,18 @@ class WebServer {
             archive.sort(sortByDate);
             trash.sort(sortByDate);
             
-            console.log(`[WebServer] Retrieved ${inbox.length} inbox, ${outbox.length} outbox, ${draft.length} draft, ${sent.length} sent, ${archive.length} archive, ${trash.length} trash mails`);
+            console.log(`[WebServer] Retrieved ${inbox.length} inbox (${inboxSize} bytes), ${outbox.length} outbox (${outboxSize} bytes), ${draft.length} draft (${draftSize} bytes), ${sent.length} sent (${sentSize} bytes), ${archive.length} archive (${archiveSize} bytes), ${trash.length} trash (${trashSize} bytes) mails`);
             
-            return { inbox, outbox, draft, sent, archive, trash };
+            return { 
+                inbox, outbox, draft, sent, archive, trash,
+                inboxSize, outboxSize, draftSize, sentSize, archiveSize, trashSize
+            };
         } catch (error) {
             console.error('[WebServer] Error retrieving WinLink mails:', error);
-            return { inbox: [], outbox: [], draft: [], sent: [], archive: [], trash: [] };
+            return { 
+                inbox: [], outbox: [], draft: [], sent: [], archive: [], trash: [],
+                inboxSize: 0, outboxSize: 0, draftSize: 0, sentSize: 0, archiveSize: 0, trashSize: 0
+            };
         }
     }
     

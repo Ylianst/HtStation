@@ -8,9 +8,13 @@ let sessionTerminals = new Map(); // Track terminal instances for each session
 
 // Initialize the application when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
+    showConnectingOverlay(); // Show connecting overlay initially
     initializeWebSocket();
     setupEventListeners();
     setupNavigation();
+
+    // Load saved preferences after setup
+    loadSavedPreferences();
 });
 
 function setupEventListeners() {
@@ -41,10 +45,13 @@ function setupNavigation() {
 
 function switchView(viewName) {
     console.log('Switching to view:', viewName);
-    
+
     // Update current view
     currentView = viewName;
-    
+
+    // Save current view to localStorage
+    saveCurrentView(viewName);
+
     // Update navigation active state
     const navItems = document.querySelectorAll('.nav-item');
     navItems.forEach(item => {
@@ -53,19 +60,19 @@ function switchView(viewName) {
             item.classList.add('active');
         }
     });
-    
+
     // Hide all content views
     const contentViews = document.querySelectorAll('.content-view');
     contentViews.forEach(view => {
         view.classList.remove('active');
     });
-    
+
     // Show selected view
     const targetView = document.getElementById(`view-${viewName}`);
     if (targetView) {
         targetView.classList.add('active');
     }
-    
+
     // Refresh data for the current view
     refreshCurrentViewData();
 }
@@ -78,6 +85,7 @@ function refreshCurrentViewData() {
 }
 
 function initializeWebSocket() {
+    // Connect to the WebSocket server on the same host that served this page
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}`;
     
@@ -90,7 +98,13 @@ function initializeWebSocket() {
             console.log('WebSocket connected');
             updateConnectionStatus('connected');
             reconnectAttempts = 0;
-            
+
+            // Hide connecting overlay and show main content
+            hideConnectingOverlay();
+
+            // Restore saved preferences after connection
+            restoreSavedPreferences();
+
             // Request initial data
             sendMessage({ type: 'get_initial_data' });
         };
@@ -107,7 +121,10 @@ function initializeWebSocket() {
         ws.onclose = function(event) {
             console.log('WebSocket disconnected');
             updateConnectionStatus('disconnected');
-            
+
+            // Show connecting overlay when disconnected
+            showConnectingOverlay();
+
             // Attempt to reconnect
             if (reconnectAttempts < maxReconnectAttempts) {
                 setTimeout(() => {
@@ -202,7 +219,7 @@ function updateWinlinkMails(mails) {
     console.log('Updating WinLink mails:', mails);
     winlinkMails = mails;
     
-    // Update folder counts
+    // Update folder counts with sizes
     document.getElementById('inbox-count').textContent = mails.inbox ? mails.inbox.length : 0;
     document.getElementById('outbox-count').textContent = mails.outbox ? mails.outbox.length : 0;
     document.getElementById('draft-count').textContent = mails.draft ? mails.draft.length : 0;
@@ -216,10 +233,22 @@ function updateWinlinkMails(mails) {
     }
 }
 
+// Helper function to format bytes into human-readable format
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+}
+
 function selectMailFolder(folder) {
     console.log('Selecting folder:', folder);
     currentMailFolder = folder;
-    
+
+    // Save current mailbox to localStorage
+    saveCurrentMailbox(folder);
+
     // Update active state on buttons
     document.querySelectorAll('.folder-btn').forEach(btn => {
         btn.classList.remove('active');
@@ -228,10 +257,10 @@ function selectMailFolder(folder) {
     if (folderBtn) {
         folderBtn.classList.add('active');
     }
-    
+
     // Clear selection
     selectedMailMid = null;
-    
+
     // Display mails for selected folder
     displayMailList();
 }
@@ -416,46 +445,189 @@ function formatMailDateTime(dateTimeStr) {
 }
 
 function updateSystemStatus(data) {
-    // Update station callsign in sidebar
+    // Update station callsign in sidebar (only callsign, no station ID)
     const stationCallsign = document.getElementById('station-callsign');
     if (stationCallsign) {
-        stationCallsign.textContent = `${data.callsign}-${data.stationId}`;
+        stationCallsign.textContent = data.callsign;
     }
-    
+
     // Update radio status in title bar
     const radioStatus = document.getElementById('radio-status');
     if (radioStatus) {
         radioStatus.textContent = data.radioConnected ? 'Connected' : 'Disconnected';
         radioStatus.className = 'status ' + (data.radioConnected ? 'connected' : 'disconnected');
     }
-    
+
     // Update app uptime in sidebar
     const appUptime = document.getElementById('app-uptime');
     if (appUptime) {
         appUptime.textContent = data.appUptime;
     }
-    
+
     // Update active connections count in sidebar
     const activeConnections = document.getElementById('active-connections');
     if (activeConnections) {
         activeConnections.textContent = data.activeConnections;
     }
-    
+
     // Update overview status elements
+    updateOverviewStats(data);
+}
+
+function updateOverviewStats(data) {
+    // Update System Status section
     const overviewRadioStatus = document.getElementById('overview-radio-status');
     if (overviewRadioStatus) {
         overviewRadioStatus.textContent = data.radioConnected ? 'Connected' : 'Disconnected';
-        overviewRadioStatus.className = 'status ' + (data.radioConnected ? 'connected' : 'disconnected');
+        overviewRadioStatus.className = 'stat-value status ' + (data.radioConnected ? 'connected' : 'disconnected');
     }
-    
+
     const overviewUptime = document.getElementById('overview-uptime');
     if (overviewUptime) {
         overviewUptime.textContent = data.appUptime;
     }
-    
+
     const overviewActive = document.getElementById('overview-active');
     if (overviewActive) {
         overviewActive.textContent = data.activeConnections;
+    }
+
+    const overviewStation = document.getElementById('overview-station');
+    if (overviewStation) {
+        overviewStation.textContent = `${data.callsign}-${data.stationId}`;
+    }
+
+    const overviewLastUpdate = document.getElementById('overview-last-update');
+    if (overviewLastUpdate) {
+        const now = new Date();
+        overviewLastUpdate.textContent = now.toLocaleTimeString();
+    }
+
+    // Update BBS and WinLink station callsigns
+    const overviewBbsStation = document.getElementById('overview-bbs-station');
+    if (overviewBbsStation && data.bbsStationId) {
+        overviewBbsStation.textContent = `${data.callsign}-${data.bbsStationId}`;
+    }
+
+    const overviewWinlinkStation = document.getElementById('overview-winlink-station');
+    if (overviewWinlinkStation && data.winlinkStationId) {
+        overviewWinlinkStation.textContent = `${data.callsign}-${data.winlinkStationId}`;
+    }
+
+    // Update BBS Status section
+    const bbsConnectedStatus = document.getElementById('bbs-connected-status');
+    if (bbsConnectedStatus) {
+        bbsConnectedStatus.textContent = data.radioConnected ? 'Connected' : 'Disconnected';
+        bbsConnectedStatus.className = 'stat-value status ' + (data.radioConnected ? 'connected' : 'disconnected');
+    }
+
+    const bbsActiveSessions = document.getElementById('bbs-active-sessions');
+    if (bbsActiveSessions) {
+        bbsActiveSessions.textContent = data.activeConnections;
+    }
+
+    // Update APRS Status section
+    const aprsStatus = document.getElementById('aprs-status');
+    if (aprsStatus) {
+        // APRS status would need to be provided by the server
+        aprsStatus.textContent = 'Active';
+        aprsStatus.className = 'stat-value status connected';
+    }
+
+    // Update WinLink Status section with counts and sizes
+    const winlinkInboxCount = document.getElementById('winlink-inbox-count');
+    if (winlinkInboxCount) {
+        const count = winlinkMails.inbox ? winlinkMails.inbox.length : 0;
+        const size = winlinkMails.inboxSize || 0;
+        winlinkInboxCount.textContent = `${count} (${formatBytes(size)})`;
+    }
+
+    const winlinkOutboxCount = document.getElementById('winlink-outbox-count');
+    if (winlinkOutboxCount) {
+        const count = winlinkMails.outbox ? winlinkMails.outbox.length : 0;
+        const size = winlinkMails.outboxSize || 0;
+        winlinkOutboxCount.textContent = `${count} (${formatBytes(size)})`;
+    }
+
+    const winlinkDraftCount = document.getElementById('winlink-draft-count');
+    if (winlinkDraftCount) {
+        const count = winlinkMails.draft ? winlinkMails.draft.length : 0;
+        const size = winlinkMails.draftSize || 0;
+        winlinkDraftCount.textContent = `${count} (${formatBytes(size)})`;
+    }
+
+    const winlinkSentCount = document.getElementById('winlink-sent-count');
+    if (winlinkSentCount) {
+        const count = winlinkMails.sent ? winlinkMails.sent.length : 0;
+        const size = winlinkMails.sentSize || 0;
+        winlinkSentCount.textContent = `${count} (${formatBytes(size)})`;
+    }
+
+    const winlinkArchiveCount = document.getElementById('winlink-archive-count');
+    if (winlinkArchiveCount) {
+        const count = winlinkMails.archive ? winlinkMails.archive.length : 0;
+        const size = winlinkMails.archiveSize || 0;
+        winlinkArchiveCount.textContent = `${count} (${formatBytes(size)})`;
+    }
+
+    const winlinkTrashCount = document.getElementById('winlink-trash-count');
+    if (winlinkTrashCount) {
+        const count = winlinkMails.trash ? winlinkMails.trash.length : 0;
+        const size = winlinkMails.trashSize || 0;
+        winlinkTrashCount.textContent = `${count} (${formatBytes(size)})`;
+    }
+
+    const winlinkTotalMessages = document.getElementById('winlink-total-messages');
+    if (winlinkTotalMessages) {
+        const total = (winlinkMails.inbox ? winlinkMails.inbox.length : 0) +
+                     (winlinkMails.outbox ? winlinkMails.outbox.length : 0) +
+                     (winlinkMails.draft ? winlinkMails.draft.length : 0) +
+                     (winlinkMails.sent ? winlinkMails.sent.length : 0) +
+                     (winlinkMails.archive ? winlinkMails.archive.length : 0) +
+                     (winlinkMails.trash ? winlinkMails.trash.length : 0);
+        winlinkTotalMessages.textContent = total;
+    }
+
+    // Update last activity timestamps
+    const bbsLastActivity = document.getElementById('bbs-last-activity');
+    if (bbsLastActivity) {
+        if (data.lastBbsActivity) {
+            bbsLastActivity.textContent = getTimeAgo(data.lastBbsActivity);
+        } else {
+            bbsLastActivity.textContent = 'No activity';
+        }
+    }
+
+    const aprsLastMessage = document.getElementById('aprs-last-message');
+    if (aprsLastMessage) {
+        if (data.lastAprsMessage) {
+            aprsLastMessage.textContent = getTimeAgo(data.lastAprsMessage);
+        } else {
+            aprsLastMessage.textContent = 'No messages';
+        }
+    }
+
+    // Update BBS total connections count
+    const bbsTotalConnections = document.getElementById('bbs-total-connections');
+    if (bbsTotalConnections) {
+        bbsTotalConnections.textContent = data.bbsTotalConnections || 0;
+    }
+
+    // Update APRS counts
+    const aprsTotalMessages = document.getElementById('aprs-total-messages');
+    if (aprsTotalMessages) {
+        aprsTotalMessages.textContent = data.aprsMessageCount || 0;
+    }
+
+    const aprsStationsCount = document.getElementById('aprs-stations-count');
+    if (aprsStationsCount) {
+        aprsStationsCount.textContent = data.aprsStationsCount || 0;
+    }
+
+    // Update bulletin count
+    const bbsActiveBulletins = document.getElementById('bbs-active-bulletins');
+    if (bbsActiveBulletins) {
+        bbsActiveBulletins.textContent = data.bulletinCount || 0;
     }
 }
 
@@ -1212,7 +1384,7 @@ function showBulletinForm() {
 function hideBulletinForm() {
     const form = document.getElementById('bulletin-create-form');
     const toggleBtn = document.getElementById('toggle-create-btn');
-    
+
     if (form) {
         // Smooth slide-up animation
         form.style.opacity = '0';
@@ -1221,13 +1393,13 @@ function hideBulletinForm() {
             form.style.display = 'none';
         }, 300);
     }
-    
+
     if (toggleBtn) {
-        toggleBtn.textContent = '+';
+        toggleBtn.textContent = 'New Bulletin';
         toggleBtn.title = 'Post New Bulletin';
         toggleBtn.classList.remove('active');
     }
-    
+
     // Clear form when hiding
     clearBulletinForm();
 }
@@ -1478,7 +1650,7 @@ function showComposeForm() {
 function hideComposeForm() {
     const form = document.getElementById('compose-form');
     const toggleBtn = document.getElementById('toggle-compose-btn');
-    
+
     if (form) {
         // Smooth slide-up animation
         form.style.opacity = '0';
@@ -1487,13 +1659,13 @@ function hideComposeForm() {
             form.style.display = 'none';
         }, 300);
     }
-    
+
     if (toggleBtn) {
-        toggleBtn.textContent = '+';
+        toggleBtn.textContent = 'New Mail';
         toggleBtn.title = 'Compose New Email';
         toggleBtn.classList.remove('active');
     }
-    
+
     // Clear form when hiding
     clearComposeForm();
 }
@@ -1643,6 +1815,99 @@ document.addEventListener('DOMContentLoaded', function() {
         updateEmailCharCount();
     }
 });
+
+// Connecting Overlay Functions
+function showConnectingOverlay() {
+    const overlay = document.getElementById('connecting-overlay');
+    const mainContainer = document.querySelector('.main-container');
+
+    if (overlay) {
+        overlay.style.display = 'flex';
+    }
+    if (mainContainer) {
+        mainContainer.style.display = 'none';
+    }
+
+    // Hide radio status when not connected
+    const radioStatus = document.getElementById('radio-status');
+    if (radioStatus) {
+        radioStatus.textContent = 'Unknown';
+        radioStatus.className = 'status';
+    }
+}
+
+function hideConnectingOverlay() {
+    const overlay = document.getElementById('connecting-overlay');
+    const mainContainer = document.querySelector('.main-container');
+
+    if (overlay) {
+        overlay.style.display = 'none';
+    }
+    if (mainContainer) {
+        mainContainer.style.display = 'flex';
+    }
+}
+
+// LocalStorage Functions for Preferences
+function saveCurrentView(viewName) {
+    try {
+        localStorage.setItem('handitalky-current-view', viewName);
+    } catch (error) {
+        console.warn('Failed to save current view to localStorage:', error);
+    }
+}
+
+function saveCurrentMailbox(mailbox) {
+    try {
+        localStorage.setItem('handitalky-current-mailbox', mailbox);
+    } catch (error) {
+        console.warn('Failed to save current mailbox to localStorage:', error);
+    }
+}
+
+function loadSavedPreferences() {
+    try {
+        const savedView = localStorage.getItem('handitalky-current-view');
+        const savedMailbox = localStorage.getItem('handitalky-current-mailbox');
+
+        if (savedView) {
+            console.log('Loading saved view:', savedView);
+            // Will be restored when WebSocket connects
+            window.savedViewToRestore = savedView;
+        }
+
+        if (savedMailbox) {
+            console.log('Loading saved mailbox:', savedMailbox);
+            // Will be restored when WebSocket connects
+            window.savedMailboxToRestore = savedMailbox;
+        }
+    } catch (error) {
+        console.warn('Failed to load saved preferences:', error);
+    }
+}
+
+function restoreSavedPreferences() {
+    try {
+        // Restore saved view/tab
+        if (window.savedViewToRestore) {
+            const targetView = document.getElementById(`view-${window.savedViewToRestore}`);
+            if (targetView) {
+                console.log('Restoring saved view:', window.savedViewToRestore);
+                switchView(window.savedViewToRestore);
+            }
+            window.savedViewToRestore = null;
+        }
+
+        // Restore saved mailbox (only if we're on the mail view)
+        if (window.savedMailboxToRestore && currentView === 'winlink-mail') {
+            console.log('Restoring saved mailbox:', window.savedMailboxToRestore);
+            selectMailFolder(window.savedMailboxToRestore);
+            window.savedMailboxToRestore = null;
+        }
+    } catch (error) {
+        console.warn('Failed to restore saved preferences:', error);
+    }
+}
 
 // Handle window beforeunload
 window.addEventListener('beforeunload', function() {
