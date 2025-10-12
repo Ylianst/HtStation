@@ -1,5 +1,8 @@
 'use strict';
 
+// Get logger instance
+const logger = global.logger ? global.logger.getLogger('APRS') : console;
+
 const crypto = require('crypto');
 const { AprsPacket } = require('../aprs/index.js');
 const Storage = require('./storage');
@@ -32,9 +35,9 @@ class AprsHandler {
         try {
             this.aprsMessageStorage = new Storage('./data/aprs-messages.db');
             this.MAX_STORED_APRS_MESSAGES = 1000;
-            console.log('[APRS] APRS message storage initialized');
+            logger.log('[APRS] APRS message storage initialized');
         } catch (error) {
-            console.error('[APRS] Failed to initialize APRS message storage:', error);
+            logger.error('[APRS] Failed to initialize APRS message storage:', error);
             this.aprsMessageStorage = null;
         }
     }
@@ -42,13 +45,13 @@ class AprsHandler {
     // Initialize station authentication table from config
     initializeAuthTable() {
         if (this.config.AUTH && Array.isArray(this.config.AUTH)) {
-            console.log('[APRS] Loading station authentication entries...');
+            logger.log('[APRS] Loading station authentication entries...');
             
             for (const authEntry of this.config.AUTH) {
                 // Parse AUTH entry format: "CALLSIGN-SSID,password"
                 const commaIndex = authEntry.indexOf(',');
                 if (commaIndex === -1) {
-                    console.warn(`[APRS] Invalid AUTH entry format (missing comma): ${authEntry}`);
+                    logger.warn(`[APRS] Invalid AUTH entry format (missing comma): ${authEntry}`);
                     continue;
                 }
                 
@@ -56,7 +59,7 @@ class AprsHandler {
                 const stationPassword = authEntry.substring(commaIndex + 1);
                 
                 if (!stationCallsign || !stationPassword) {
-                    console.warn(`[APRS] Invalid AUTH entry (empty callsign or password): ${authEntry}`);
+                    logger.warn(`[APRS] Invalid AUTH entry (empty callsign or password): ${authEntry}`);
                     continue;
                 }
                 
@@ -74,12 +77,12 @@ class AprsHandler {
                     passwordHash: passwordHash
                 });
                 
-                console.log(`[APRS] Added authentication entry for station: ${stationCallsign}`);
+                logger.log(`[APRS] Added authentication entry for station: ${stationCallsign}`);
             }
             
-            console.log(`[APRS] Station authentication table loaded with ${this.stationAuthTable.size} entries`);
+            logger.log(`[APRS] Station authentication table loaded with ${this.stationAuthTable.size} entries`);
         } else {
-            console.log('[APRS] No AUTH entries found in configuration');
+            logger.log('[APRS] No AUTH entries found in configuration');
         }
     }
     
@@ -212,17 +215,17 @@ class AprsHandler {
             const storageKey = `aprs-msg-${now.getTime()}`;
             
             if (this.aprsMessageStorage.save(storageKey, messageRecord)) {
-                console.log(`[APRS Storage] Stored ${aprsPacket.dataType} from ${sourceCallsign} > ${destinationCallsign}: "${messageText}"`);
+                logger.log(`[APRS Storage] Stored ${aprsPacket.dataType} from ${sourceCallsign} > ${destinationCallsign}: "${messageText}"`);
                 
                 // Maintain message limit
                 this.cleanupOldAprsMessages();
                 return true;
             } else {
-                console.error(`[APRS Storage] Failed to store ${aprsPacket.dataType} from ${sourceCallsign}`);
+                logger.error(`[APRS Storage] Failed to store ${aprsPacket.dataType} from ${sourceCallsign}`);
                 return false;
             }
         } catch (error) {
-            console.error('[APRS Storage] Error storing APRS data:', error);
+            logger.error('[APRS Storage] Error storing APRS data:', error);
             return false;
         }
     }
@@ -258,17 +261,17 @@ class AprsHandler {
             const storageKey = `aprs-msg-${now.getTime()}`;
             
             if (this.aprsMessageStorage.save(storageKey, messageRecord)) {
-                console.log(`[APRS Storage] Stored message ${sourceCallsign} > ${destinationCallsign}: "${messageText}"`);
+                logger.log(`[APRS Storage] Stored message ${sourceCallsign} > ${destinationCallsign}: "${messageText}"`);
                 
                 // Maintain message limit
                 this.cleanupOldAprsMessages();
                 return true;
             } else {
-                console.error(`[APRS Storage] Failed to store message from ${sourceCallsign}`);
+                logger.error(`[APRS Storage] Failed to store message from ${sourceCallsign}`);
                 return false;
             }
         } catch (error) {
-            console.error('[APRS Storage] Error storing message:', error);
+            logger.error('[APRS Storage] Error storing message:', error);
             return false;
         }
     }
@@ -294,10 +297,10 @@ class AprsHandler {
                     this.aprsMessageStorage.delete(key);
                 }
                 
-                console.log(`[APRS Storage] Cleaned up ${keysToDelete.length} old APRS message records`);
+                logger.log(`[APRS Storage] Cleaned up ${keysToDelete.length} old APRS message records`);
             }
         } catch (error) {
-            console.error('[APRS Storage] Error cleaning up old messages:', error);
+            logger.error('[APRS Storage] Error cleaning up old messages:', error);
         }
     }
     
@@ -315,7 +318,7 @@ class AprsHandler {
     
     // Function to compute APRS authentication code for outgoing messages
     computeAprsAuthenticationCode(destinationCallsign, aprsMessage, msgId) {
-        console.log(`[APRS Auth] Computing auth code for outgoing message to ${destinationCallsign}`);
+        logger.log(`[APRS Auth] Computing auth code for outgoing message to ${destinationCallsign}`);
         
         // Normalize destination callsign
         let upperDestination = destinationCallsign.toUpperCase();
@@ -343,7 +346,7 @@ class AprsHandler {
         }
         
         if (!sharedSecret) {
-            console.log(`[APRS Auth] No shared secret found for ${upperDestination} - cannot compute auth code`);
+            logger.log(`[APRS Auth] No shared secret found for ${upperDestination} - cannot compute auth code`);
             return null; // No shared secret for this destination
         }
         
@@ -366,39 +369,39 @@ class AprsHandler {
             hashMessage = `${currentMinutes}:${sourceStation}:${upperDestination}:${aprsMessage}`;
         }
         
-        console.log(`[APRS Auth] Hash message for outgoing: ${hashMessage}`);
+        logger.log(`[APRS Auth] Hash message for outgoing: ${hashMessage}`);
         
         // Compute HMAC-SHA256
         const hmac = crypto.createHmac('sha256', secretKey);
         hmac.update(Buffer.from(hashMessage, 'utf8'));
         const computedToken = hmac.digest('base64').substring(0, 6);
         
-        console.log(`[APRS Auth] Computed outgoing auth code: ${computedToken}`);
+        logger.log(`[APRS Auth] Computed outgoing auth code: ${computedToken}`);
         
         return computedToken;
     }
     
     // Function to verify APRS message authentication
     verifyAprsAuthentication(authCode, senderCallsign, aprsMessage, msgId, addressee) {
-        console.log(`[APRS Auth DEBUG] Starting authentication for ${senderCallsign}`);
-        console.log(`[APRS Auth DEBUG] Auth code: ${authCode}`);
-        console.log(`[APRS Auth DEBUG] Message: ${aprsMessage}`);
-        console.log(`[APRS Auth DEBUG] Msg ID: ${msgId}`);
-        console.log(`[APRS Auth DEBUG] Addressee: "${addressee}"`);
+        logger.log(`[APRS Auth DEBUG] Starting authentication for ${senderCallsign}`);
+        logger.log(`[APRS Auth DEBUG] Auth code: ${authCode}`);
+        logger.log(`[APRS Auth DEBUG] Message: ${aprsMessage}`);
+        logger.log(`[APRS Auth DEBUG] Msg ID: ${msgId}`);
+        logger.log(`[APRS Auth DEBUG] Addressee: "${addressee}"`);
         
         // Normalize sender callsign
         let upperSender = senderCallsign.toUpperCase();
         if (!upperSender.includes('-')) {
             upperSender = `${upperSender}-0`;
         }
-        console.log(`[APRS Auth DEBUG] Normalized sender: ${upperSender}`);
+        logger.log(`[APRS Auth DEBUG] Normalized sender: ${upperSender}`);
         
         // Check if we have authentication info for this station
         const authEntry = this.stationAuthTable.get(upperSender);
         if (!authEntry) {
             return false; // No authentication entry for this station
         }
-        console.log(`[APRS Auth DEBUG] Found auth entry for ${upperSender}`);
+        logger.log(`[APRS Auth DEBUG] Found auth entry for ${upperSender}`);
         
         // Get the shared secret (password) from config
         // We need to find the original password, not the hash
@@ -423,19 +426,19 @@ class AprsHandler {
         if (!sharedSecret) {
             return false; // Could not find shared secret
         }
-        console.log(`[APRS Auth DEBUG] Found shared secret: ${sharedSecret}`);
+        logger.log(`[APRS Auth DEBUG] Found shared secret: ${sharedSecret}`);
         
         // Compute SHA256 hash of the shared secret (SecretKey)
         const secretKey = crypto.createHash('sha256').update(sharedSecret, 'utf8').digest();
-        console.log(`[APRS Auth DEBUG] Secret key (hex): ${secretKey.toString('hex')}`);
+        logger.log(`[APRS Auth DEBUG] Secret key (hex): ${secretKey.toString('hex')}`);
         
         // Get current time in minutes since January 1, 1970 UTC
         const currentMinutes = Math.floor(Date.now() / (1000 * 60));
-        console.log(`[APRS Auth DEBUG] Current minutes: ${currentMinutes}`);
+        logger.log(`[APRS Auth DEBUG] Current minutes: ${currentMinutes}`);
         
         // Use the addressee from the APRS message and trim to match C# implementation
         const destinationStation = addressee.trim();
-        console.log(`[APRS Auth DEBUG] Destination station (from addressee): "${destinationStation}"`);
+        logger.log(`[APRS Auth DEBUG] Destination station (from addressee): "${destinationStation}"`);
 
         // Try authentication with 4 minute window (current, 3 previous, 1 future)
         const minutesToTry = [
@@ -457,22 +460,22 @@ class AprsHandler {
                 hashMessage = `${minutesUtc}:${upperSender}:${destinationStation}:${aprsMessage}`;
             }
             
-            console.log(`[APRS Auth DEBUG] Hash message for minute ${minutesUtc}: ${hashMessage}`);
+            logger.log(`[APRS Auth DEBUG] Hash message for minute ${minutesUtc}: ${hashMessage}`);
             
             const hmac = crypto.createHmac('sha256', secretKey);
             hmac.update(Buffer.from(hashMessage, 'utf8'));
             const computedToken = hmac.digest('base64').substring(0, 6);
             
-            console.log(`[APRS Auth DEBUG] Computed token for minute ${minutesUtc}: ${computedToken}`);
+            logger.log(`[APRS Auth DEBUG] Computed token for minute ${minutesUtc}: ${computedToken}`);
             
             // Compare with provided auth code
             if (computedToken === authCode) {
-                console.log(`[APRS Auth] Authentication successful for ${senderCallsign} using minute ${minutesUtc}`);
+                logger.log(`[APRS Auth] Authentication successful for ${senderCallsign} using minute ${minutesUtc}`);
                 return true;
             }
         }
         
-        console.log(`[APRS Auth] Authentication failed for ${senderCallsign} - no matching token found`);
+        logger.log(`[APRS Auth] Authentication failed for ${senderCallsign} - no matching token found`);
         return false;
     }
     
@@ -517,13 +520,13 @@ class AprsHandler {
             const storageKey = `aprs-msg-${now.getTime()}`;
             
             if (this.aprsMessageStorage.save(storageKey, messageRecord)) {
-                console.log(`[APRS Storage] Stored sent message to ${destinationCallsign}: "${messageText}"`);
+                logger.log(`[APRS Storage] Stored sent message to ${destinationCallsign}: "${messageText}"`);
                 this.cleanupOldAprsMessages();
                 return true;
             }
             return false;
         } catch (error) {
-            console.error('[APRS Storage] Error storing sent message:', error);
+            logger.error('[APRS Storage] Error storing sent message:', error);
             return false;
         }
     }
@@ -546,19 +549,19 @@ class AprsHandler {
             const authCode = this.computeAprsAuthenticationCode(destinationCallsign, messageText, seqId);
             if (authCode) {
                 aprsMessage = `:${paddedDestination}:${messageText}}${authCode}{${seqId}`;
-                console.log(`[APRS Send] Adding authentication to outgoing message: ${authCode}`);
+                logger.log(`[APRS Send] Adding authentication to outgoing message: ${authCode}`);
             } else {
-                console.error(`[APRS Send] Failed to compute authentication code for ${destinationCallsign}`);
+                logger.error(`[APRS Send] Failed to compute authentication code for ${destinationCallsign}`);
                 return false; // Cannot send authenticated message without auth code
             }
         }
         
-        console.log(`[APRS Send] Sending message to ${destinationCallsign}: "${messageText}" (Seq: ${seqId}, Auth: ${requiresAuth})`);
+        logger.log(`[APRS Send] Sending message to ${destinationCallsign}: "${messageText}" (Seq: ${seqId}, Auth: ${requiresAuth})`);
         
         // Send the message immediately
         const success = this.sendAprsPacket(aprsMessage);
         if (!success) {
-            console.error(`[APRS Send] Failed to send initial message to ${destinationCallsign}`);
+            logger.error(`[APRS Send] Failed to send initial message to ${destinationCallsign}`);
             return false;
         }
         
@@ -585,7 +588,7 @@ class AprsHandler {
             this.retryAprsMessage(queueKey);
         }, this.RETRY_INTERVAL_MS);
         
-        console.log(`[APRS Send] Message queued for ACK tracking: ${queueKey}`);
+        logger.log(`[APRS Send] Message queued for ACK tracking: ${queueKey}`);
         return true;
     }
     
@@ -593,12 +596,12 @@ class AprsHandler {
     retryAprsMessage(queueKey) {
         const queueEntry = this.aprsOutgoingQueue.get(queueKey);
         if (!queueEntry) {
-            console.log(`[APRS Send] Queue entry ${queueKey} not found for retry`);
+            logger.log(`[APRS Send] Queue entry ${queueKey} not found for retry`);
             return;
         }
         
         if (queueEntry.attempts >= this.MAX_RETRIES) {
-            console.log(`[APRS Send] Max retries (${this.MAX_RETRIES}) reached for message to ${queueEntry.destinationCallsign}, giving up`);
+            logger.log(`[APRS Send] Max retries (${this.MAX_RETRIES}) reached for message to ${queueEntry.destinationCallsign}, giving up`);
             this.aprsOutgoingQueue.delete(queueKey);
             return;
         }
@@ -606,12 +609,12 @@ class AprsHandler {
         queueEntry.attempts++;
         queueEntry.sentTime = new Date();
         
-        console.log(`[APRS Send] Retrying message to ${queueEntry.destinationCallsign} (attempt ${queueEntry.attempts}/${this.MAX_RETRIES})`);
+        logger.log(`[APRS Send] Retrying message to ${queueEntry.destinationCallsign} (attempt ${queueEntry.attempts}/${this.MAX_RETRIES})`);
         
         // Send the message again
         const success = this.sendAprsPacket(queueEntry.aprsMessage);
         if (!success) {
-            console.error(`[APRS Send] Failed to send retry ${queueEntry.attempts} to ${queueEntry.destinationCallsign}`);
+            logger.error(`[APRS Send] Failed to send retry ${queueEntry.attempts} to ${queueEntry.destinationCallsign}`);
         }
         
         // Set up next retry timer if not at max attempts
@@ -631,14 +634,14 @@ class AprsHandler {
         const queueEntry = this.aprsOutgoingQueue.get(queueKey);
         
         if (!queueEntry) {
-            console.log(`[APRS ACK] Received ACK from ${senderCallsign} for sequence ${ackSeqId}, but no pending message found`);
+            logger.log(`[APRS ACK] Received ACK from ${senderCallsign} for sequence ${ackSeqId}, but no pending message found`);
             return;
         }
         
         // Check authentication if original message required auth
         if (queueEntry.requiresAuth) {
             if (!authCode) {
-                console.log(`[APRS ACK] ACK from ${senderCallsign} missing required authentication, ignoring`);
+                logger.log(`[APRS ACK] ACK from ${senderCallsign} missing required authentication, ignoring`);
                 return;
             }
             
@@ -652,13 +655,13 @@ class AprsHandler {
             );
             
             if (!isValidAuth) {
-                console.log(`[APRS ACK] ACK from ${senderCallsign} has invalid authentication, ignoring`);
+                logger.log(`[APRS ACK] ACK from ${senderCallsign} has invalid authentication, ignoring`);
                 return;
             }
             
-            console.log(`[APRS ACK] Authenticated ACK received from ${senderCallsign} for sequence ${ackSeqId}`);
+            logger.log(`[APRS ACK] Authenticated ACK received from ${senderCallsign} for sequence ${ackSeqId}`);
         } else {
-            console.log(`[APRS ACK] ACK received from ${senderCallsign} for sequence ${ackSeqId}`);
+            logger.log(`[APRS ACK] ACK received from ${senderCallsign} for sequence ${ackSeqId}`);
         }
         
         // Clear retry timer and remove from queue
@@ -667,19 +670,19 @@ class AprsHandler {
         }
         
         this.aprsOutgoingQueue.delete(queueKey);
-        console.log(`[APRS ACK] Message to ${senderCallsign} successfully acknowledged, removed from queue`);
+        logger.log(`[APRS ACK] Message to ${senderCallsign} successfully acknowledged, removed from queue`);
     }
     
     // Helper function to send APRS packet
     sendAprsPacket(aprsMessage) {
         // Find the APRS channel packet template from recent traffic
         // This is a simplified approach - in practice you'd want to store channel info
-        console.log(`[APRS Send] Transmitting: "${aprsMessage}"`);
+        logger.log(`[APRS Send] Transmitting: "${aprsMessage}"`);
         
         // For now, we'll use a basic approach to send the packet
         // In a real implementation, you'd create proper AX.25 packet with addresses
         if (typeof this.radio.sendTncFrame !== 'function') {
-            console.warn('[APRS Send] radio.sendTncFrame not implemented - cannot send message');
+            logger.warn('[APRS Send] radio.sendTncFrame not implemented - cannot send message');
             return false;
         }
         
@@ -712,7 +715,7 @@ class AprsHandler {
             
             const serialized = packet.toByteArray();
             if (!serialized) {
-                console.error('[APRS Send] Packet serialization failed');
+                logger.error('[APRS Send] Packet serialization failed');
                 return false;
             }
             
@@ -723,14 +726,14 @@ class AprsHandler {
             
             return true;
         } catch (error) {
-            console.error(`[APRS Send] Error sending packet: ${error.message}`);
+            logger.error(`[APRS Send] Error sending packet: ${error.message}`);
             return false;
         }
     }
     
     // Main APRS packet processing function
     processAprsPacket(packet) {
-        console.log('[APRS] APRS packet detected, attempting to decode...');
+        logger.log('[APRS] APRS packet detected, attempting to decode...');
         
         try {
             // Create APRS input object from AX.25 packet
@@ -835,16 +838,16 @@ class AprsHandler {
                         };
                         
                         this.mqttReporter.publishStatus(aprsMessageTopic, messageData);
-                        console.log(`[MQTT] Published to ${sensorType} sensor: "${formattedMessage}"`);
+                        logger.log(`[MQTT] Published to ${sensorType} sensor: "${formattedMessage}"`);
                         
                         // Store APRS messages that are NOT for our station (for BBS retrieval)
                         if (!isForUs) {
                             this.storeAprsMessage(senderCallsign, addressee, messageText);
                         }
                     } else if (isDuplicateMessage) {
-                        console.log(`[APRS] Duplicate message detected from ${senderCallsign} with sequence ${messageSeqId} - skipping MQTT publish`);
+                        logger.log(`[APRS] Duplicate message detected from ${senderCallsign} with sequence ${messageSeqId} - skipping MQTT publish`);
                     } else if (isAckMessage) {
-                        console.log(`[APRS] ACK message detected from ${senderCallsign} - skipping MQTT publish`);
+                        logger.log(`[APRS] ACK message detected from ${senderCallsign} - skipping MQTT publish`);
                     }
                 }
                 
@@ -871,37 +874,37 @@ class AprsHandler {
                                 aprsPacket.messageData.addressee
                             );
                             authenticationResult = isAuthenticated ? 'SUCCESS' : 'FAILED';
-                            console.log(`[APRS Auth] Authentication ${authenticationResult} for message from ${senderCallsign} with auth code ${aprsPacket.messageData.authCode}`);
+                            logger.log(`[APRS Auth] Authentication ${authenticationResult} for message from ${senderCallsign} with auth code ${aprsPacket.messageData.authCode}`);
                             
                             // If authentication failed, stop processing this message
                             if (authenticationResult === 'FAILED') {
-                                console.log(`[APRS] Ignoring message from ${senderCallsign} due to authentication failure`);
+                                logger.log(`[APRS] Ignoring message from ${senderCallsign} due to authentication failure`);
                                 return; // Stop processing this message
                             }
                         } else if (this.requiresAuthentication(senderCallsign)) {
                             authenticationResult = 'REQUIRED_BUT_MISSING';
-                            console.log(`[APRS Auth] Authentication REQUIRED but MISSING for message from ${senderCallsign}`);
+                            logger.log(`[APRS Auth] Authentication REQUIRED but MISSING for message from ${senderCallsign}`);
                         }
                         
                         if (isDuplicateMessage) {
-                            console.log(`[APRS] Duplicate message from ${senderCallsign} sequence ${seqId} - sending ACK but not processing further`);
+                            logger.log(`[APRS] Duplicate message from ${senderCallsign} sequence ${seqId} - sending ACK but not processing further`);
                         } else {
                             const authMsg = authenticationResult ? ` (Auth: ${authenticationResult})` : '';
-                            console.log(`[APRS] Message addressed to our station! Sending ACK for sequence ${seqId}${authMsg}`);
+                            logger.log(`[APRS] Message addressed to our station! Sending ACK for sequence ${seqId}${authMsg}`);
                             
                             // Check if this is an ECHO message (only process for non-duplicates)
                             if (aprsPacket.messageData.msgText.startsWith('ECHO:')) {
                                 const echoText = aprsPacket.messageData.msgText.substring(5); // Remove "ECHO:" prefix
-                                console.log(`[APRS] ECHO request from ${senderCallsign}: "${echoText}"`);
+                                logger.log(`[APRS] ECHO request from ${senderCallsign}: "${echoText}"`);
                                 
                                 // Use sendMessage for ECHO reply with authentication based on original message
                                 const requiresAuth = (authenticationResult === 'SUCCESS');
                                 const success = this.sendMessage(senderCallsign, echoText, requiresAuth);
                                 
                                 if (success) {
-                                    console.log(`[APRS] Sent ECHO reply to ${senderCallsign}: "${echoText}" (Auth: ${requiresAuth})`);
+                                    logger.log(`[APRS] Sent ECHO reply to ${senderCallsign}: "${echoText}" (Auth: ${requiresAuth})`);
                                 } else {
-                                    console.error(`[APRS] Failed to send ECHO reply to ${senderCallsign}`);
+                                    logger.error(`[APRS] Failed to send ECHO reply to ${senderCallsign}`);
                                 }
                             }
                         }
@@ -916,11 +919,11 @@ class AprsHandler {
                             const authCode = this.computeAprsAuthenticationCode(senderCallsign, `ack${seqId}`, null);
                             if (authCode) {
                                 ackMessage = `:${paddedSender}:ack${seqId}}${authCode}`;
-                                console.log(`[APRS] Adding authentication to ACK: ${authCode}`);
+                                logger.log(`[APRS] Adding authentication to ACK: ${authCode}`);
                             }
                         }
                         
-                        console.log(`[APRS] Sending ACK: "${ackMessage}"`);
+                        logger.log(`[APRS] Sending ACK: "${ackMessage}"`);
                         
                         // Create reply packet with same addresses but set our callsign in position 1
                         if (packet.addresses.length > 1) {
@@ -947,15 +950,15 @@ class AprsHandler {
                             // Serialize and send the ACK packet
                             const serialized = ackPacket.ToByteArray ? ackPacket.ToByteArray() : (ackPacket.toByteArray ? ackPacket.toByteArray() : null);
                             if (!serialized) {
-                                console.warn('[APRS] ACK packet serialization failed:', ackPacket);
+                                logger.warn('[APRS] ACK packet serialization failed:', ackPacket);
                             } else if (typeof this.radio.sendTncFrame !== 'function') {
-                                console.warn('[APRS] radio.sendTncFrame not implemented - cannot send ACK');
+                                logger.warn('[APRS] radio.sendTncFrame not implemented - cannot send ACK');
                             } else {
                                 this.radio.sendTncFrame({
                                     channel_id: ackPacket.channel_id,
                                     data: serialized
                                 });
-                                console.log(`[APRS] Sent ACK for message sequence ${aprsPacket.messageData.seqId} to ${senderCallsign}`);
+                                logger.log(`[APRS] Sent ACK for message sequence ${aprsPacket.messageData.seqId} to ${senderCallsign}`);
                             }
                         }
                     } else if (isForUs && aprsPacket.messageData.msgType === 'Ack') {
@@ -964,7 +967,7 @@ class AprsHandler {
                         const senderAddress = packet.addresses.length > 1 ? packet.addresses[1] : packet.addresses[0];
                         const senderCallsign = senderAddress.address + (senderAddress.SSID > 0 ? `-${senderAddress.SSID}` : '');
                         
-                        console.log(`[APRS ACK] Received ACK from ${senderCallsign} for sequence ${ackSeqId}`);
+                        logger.log(`[APRS ACK] Received ACK from ${senderCallsign} for sequence ${ackSeqId}`);
                         
                         // Handle the ACK (this will check authentication if required)
                         this.handleReceivedAck(senderCallsign, ackSeqId, aprsPacket.messageData.authCode, aprsPacket.messageData.msgText);
@@ -978,30 +981,30 @@ class AprsHandler {
                             const senderAddress = packet.addresses.length > 1 ? packet.addresses[1] : packet.addresses[0];
                             const senderCallsign = senderAddress.address + (senderAddress.SSID > 0 ? `-${senderAddress.SSID}` : '');
                             
-                            console.log(`[APRS ACK] Received ACK from ${senderCallsign} for sequence ${ackSeqId} (fallback detection)`);
+                            logger.log(`[APRS ACK] Received ACK from ${senderCallsign} for sequence ${ackSeqId} (fallback detection)`);
                             
                             // Handle the ACK (this will check authentication if required)
                             this.handleReceivedAck(senderCallsign, ackSeqId, aprsPacket.messageData.authCode, aprsPacket.messageData.msgText);
                         } else {
-                            console.log('[APRS] Message addressed to our station (no sequence ID or not a regular message)');
+                            logger.log('[APRS] Message addressed to our station (no sequence ID or not a regular message)');
                         }
                     } else if (isForUs) {
-                        console.log('[APRS] Message addressed to our station (no sequence ID or not a regular message)');
+                        logger.log('[APRS] Message addressed to our station (no sequence ID or not a regular message)');
                     }
                 }
                 
                 // Log any parse errors if present
                 if (aprsPacket.parseErrors && aprsPacket.parseErrors.length > 0) {
-                    console.log('[APRS] Parse warnings:');
+                    logger.log('[APRS] Parse warnings:');
                     aprsPacket.parseErrors.forEach(err => {
-                        console.log(`  ${err.error}`);
+                        logger.log(`  ${err.error}`);
                     });
                 }
             } else {
-                console.log('[APRS] ERROR: Failed to parse APRS packet from channel APRS');
+                logger.log('[APRS] ERROR: Failed to parse APRS packet from channel APRS');
             }
         } catch (error) {
-            console.log(`[APRS] ERROR: Exception while parsing APRS packet: ${error.message}`);
+            logger.log(`[APRS] ERROR: Exception while parsing APRS packet: ${error.message}`);
         }
     }
 }

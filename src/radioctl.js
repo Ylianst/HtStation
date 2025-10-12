@@ -1,5 +1,8 @@
 'use strict';
 
+// Get logger instance
+const logger = global.logger ? global.logger.getLogger('RadioCtl') : console;
+
 class RadioController {
     constructor(config, radio, mqttReporter) {
         this.config = config;
@@ -94,21 +97,21 @@ class RadioController {
             // When all channels loaded, publish VFO selects
             if (info.type === 'AllChannelsLoaded' && info.value && Array.isArray(info.value)) {
                 const channels = info.value;
-                //console.log('[RadioCtl] AllChannelsLoaded channels:', channels);
+                //logger.log('[RadioCtl] AllChannelsLoaded channels:', channels);
                 this.lastChannels = channels;
                 // DEBUG: show all channel name_str values and lengths to diagnose missing names
                 try {
                     const names = channels.map((ch, idx) => ({ idx: idx + 1, name: (ch && ch.name_str) || '', len: (ch && ch.name_str) ? ch.name_str.length : 0 }));
-                    //console.log('[RadioCtl] AllChannelsLoaded names:', names.slice(0, 30));
+                    //logger.log('[RadioCtl] AllChannelsLoaded names:', names.slice(0, 30));
                     // Show raw bytes for the channel name field for the first 10 channels to diagnose
                     const rawNameBytes = channels.slice(0, 10).map((ch, idx) => {
                         if (!ch || !ch.raw || ch.raw.length < 30) return { idx: idx + 1, raw: null };
                         // raw is an array of bytes; name field starts at offset 20 length 10
                         return { idx: idx + 1, raw: ch.raw.slice(20, 30) };
                     });
-                    //console.log('[RadioCtl] AllChannelsLoaded raw name bytes (first 10):', rawNameBytes);
+                    //logger.log('[RadioCtl] AllChannelsLoaded raw name bytes (first 10):', rawNameBytes);
                 } catch (e) {
-                    console.error('[RadioCtl] Error logging channel names:', e.message);
+                    logger.error('[RadioCtl] Error logging channel names:', e.message);
                 }
                 const channelAIdx = (this.lastSettingsInfo && typeof this.lastSettingsInfo.channel_a === 'number') ? (this.lastSettingsInfo.channel_a) : 0;
                 const channelBIdx = (this.lastSettingsInfo && typeof this.lastSettingsInfo.channel_b === 'number') ? (this.lastSettingsInfo.channel_b) : 0;
@@ -116,7 +119,7 @@ class RadioController {
                 // Force republish to ensure Home Assistant receives the latest channel names (especially after region changes)
                 this.lastPublishedVfoOptions = null;
                 this.publishVfoSelects(channels, channelAIdx, channelBIdx);
-                //console.log('[RadioCtl] Updated VFO selects with reloaded channels.');
+                //logger.log('[RadioCtl] Updated VFO selects with reloaded channels.');
             }
             // When MQTT connects, publish last channel info if available
             // (Handled by the mqttReporter.connect override below when the MQTT reporter is created.)
@@ -151,13 +154,13 @@ class RadioController {
             } else if (info.type === 'AllChannelsLoaded') {
                 console.log(`[RadioCtl] All channels loaded.`);
             } else {
-                console.log('[RadioCtl] Received info update:', info);
+                logger.log('[RadioCtl] Received info update:', info);
             }
             */
         });
 
         this.radio.on('positionUpdate', (position) => {
-            console.log(`[RadioCtl] GPS Position: ${position.latitudeStr}, ${position.longitudeStr}, Alt: ${position.altitude}m, Lock: ${position.locked}`);
+            logger.log(`[RadioCtl] GPS Position: ${position.latitudeStr}, ${position.longitudeStr}, Alt: ${position.altitude}m, Lock: ${position.locked}`);
             
             // Publish GPS position data to MQTT
             if (this.mqttReporter && this.config.MQTT_TOPIC) {
@@ -176,10 +179,10 @@ class RadioController {
                     timestamp: position.receivedTime.toISOString()
                 };
                 this.mqttReporter.publishStatus(gpsPositionTopic, positionData);
-                //console.log(`[MQTT] DEBUG: Published GPS position data to ${gpsPositionTopic}`);
-                //console.log(`[MQTT] DEBUG: Position data:`, JSON.stringify(positionData, null, 2));
+                //logger.log(`[MQTT] DEBUG: Published GPS position data to ${gpsPositionTopic}`);
+                //logger.log(`[MQTT] DEBUG: Position data:`, JSON.stringify(positionData, null, 2));
             } else {
-                console.log('[MQTT] Cannot publish GPS position - mqttReporter or config.MQTT_TOPIC not available');
+                logger.log('[MQTT] Cannot publish GPS position - mqttReporter or config.MQTT_TOPIC not available');
             }
         });
     }
@@ -237,43 +240,43 @@ class RadioController {
                     const vfo1CommandTopic = `${this.config.MQTT_TOPIC}/vfo1/set`;
                     const vfo2CommandTopic = `${this.config.MQTT_TOPIC}/vfo2/set`;
                     this.mqttReporter.client.subscribe([vfo1CommandTopic, vfo2CommandTopic], (err) => {
-                        if (!err) console.log('[MQTT] Subscribed to VFO command topics');
+                        if (!err) logger.log('[MQTT] Subscribed to VFO command topics');
                     });
 
                     // Subscribe to Volume command topic 
                     const volumeCommandTopic = `${this.config.MQTT_TOPIC}/volume/set`;
                     this.mqttReporter.client.subscribe(volumeCommandTopic, (err) => {
-                        if (!err) console.log('[MQTT] Subscribed to Volume command topic');
+                        if (!err) logger.log('[MQTT] Subscribed to Volume command topic');
                     });
 
                     // Subscribe to Squelch command topic 
                     const squelchCommandTopic = `${this.config.MQTT_TOPIC}/squelch/set`;
                     this.mqttReporter.client.subscribe(squelchCommandTopic, (err) => {
-                        if (!err) console.log('[MQTT] Subscribed to Squelch command topic');
+                        if (!err) logger.log('[MQTT] Subscribed to Squelch command topic');
                     });
 
                     // Subscribe to Scan command topic 
                     const scanCommandTopic = `${this.config.MQTT_TOPIC}/scan/set`;
                     this.mqttReporter.client.subscribe(scanCommandTopic, (err) => {
-                        if (!err) console.log('[MQTT] Subscribed to Scan command topic');
+                        if (!err) logger.log('[MQTT] Subscribed to Scan command topic');
                     });
 
                     // Subscribe to Double Channel command topic 
                     const doubleChannelCommandTopic = `${this.config.MQTT_TOPIC}/double_channel/set`;
                     this.mqttReporter.client.subscribe(doubleChannelCommandTopic, (err) => {
-                        if (!err) console.log('[MQTT] Subscribed to Double Channel command topic');
+                        if (!err) logger.log('[MQTT] Subscribed to Double Channel command topic');
                     });
 
                     // Subscribe to Region Select command topic 
                     const regionCommandTopic = `${this.config.MQTT_TOPIC}/region_select/set`;
                     this.mqttReporter.client.subscribe(regionCommandTopic, (err) => {
-                        if (!err) console.log('[MQTT] Subscribed to Region Select command topic');
+                        if (!err) logger.log('[MQTT] Subscribed to Region Select command topic');
                     });
 
                     // Subscribe to GPS command topic
                     const gpsCommandTopic = `${this.config.MQTT_TOPIC}/gps/set`;
                     this.mqttReporter.client.subscribe(gpsCommandTopic, (err) => {
-                        if (!err) console.log('[MQTT] Subscribed to GPS command topic');
+                        if (!err) logger.log('[MQTT] Subscribed to GPS command topic');
                     });
 
                     if (!this.mqttReporter._vfoHandlerInstalled) {
@@ -282,7 +285,7 @@ class RadioController {
                                 const msg = message.toString();
                                 if (topic === vfo1CommandTopic) {
                                     this.mqttReporter.publishStatus(`${this.config.MQTT_TOPIC}/vfo1`, { vfo: msg });
-                                    console.log(`[MQTT] VFO1 set to: ${msg}`);
+                                    logger.log(`[MQTT] VFO1 set to: ${msg}`);
                                     const m = msg.match(/^\s*(\d+)\s*:/);
                                     if (m) {
                                         const idx = parseInt(m[1], 10) - 1;
@@ -294,7 +297,7 @@ class RadioController {
                                     }
                                 } else if (topic === vfo2CommandTopic) {
                                     this.mqttReporter.publishStatus(`${this.config.MQTT_TOPIC}/vfo2`, { vfo: msg });
-                                    console.log(`[MQTT] VFO2 set to: ${msg}`);
+                                    logger.log(`[MQTT] VFO2 set to: ${msg}`);
                                     const m = msg.match(/^\s*(\d+)\s*:/);
                                     if (m) {
                                         const idx = parseInt(m[1], 10) - 1;
@@ -307,19 +310,19 @@ class RadioController {
                                 } else if (topic === volumeCommandTopic) {
                                     const volumeLevel = parseInt(msg, 10);
                                     if (!isNaN(volumeLevel) && volumeLevel >= 0 && volumeLevel <= 15) {
-                                        console.log(`[MQTT] Volume set to: ${volumeLevel}`);
+                                        logger.log(`[MQTT] Volume set to: ${volumeLevel}`);
                                         if (this.radio && typeof this.radio.setVolumeLevel === 'function') {
                                             this.radio.setVolumeLevel(volumeLevel);
                                         }
                                         // Optimistically publish the new volume state 
                                         this.mqttReporter.publishStatus(`${this.config.MQTT_TOPIC}/volume`, { volume: volumeLevel });
                                     } else {
-                                        console.warn(`[MQTT] Invalid volume level: ${msg} (expected 0-15)`);
+                                        logger.warn(`[MQTT] Invalid volume level: ${msg} (expected 0-15)`);
                                     }
                                 } else if (topic === squelchCommandTopic) {
                                     const squelchLevel = parseInt(msg, 10);
                                     if (!isNaN(squelchLevel) && squelchLevel >= 0 && squelchLevel <= 15) {
-                                        console.log(`[MQTT] Squelch set to: ${squelchLevel}`);
+                                        logger.log(`[MQTT] Squelch set to: ${squelchLevel}`);
                                         if (this.radio && typeof this.radio.writeSettings === 'function' && this.lastSettingsInfo) {
                                             // Use current settings but update squelch level
                                             const cha = (this.lastSettingsInfo && typeof this.lastSettingsInfo.channel_a === 'number') ? this.lastSettingsInfo.channel_a : 0;
@@ -331,13 +334,13 @@ class RadioController {
                                         // Optimistically publish the new squelch state 
                                         this.mqttReporter.publishStatus(`${this.config.MQTT_TOPIC}/squelch`, { squelch: squelchLevel });
                                     } else {
-                                        console.warn(`[MQTT] Invalid squelch level: ${msg} (expected 0-15)`);
+                                        logger.warn(`[MQTT] Invalid squelch level: ${msg} (expected 0-15)`);
                                     }
                                 } else if (topic === scanCommandTopic) {
                                     const scanState = msg.toUpperCase();
                                     if (scanState === 'ON' || scanState === 'OFF') {
                                         const scanValue = scanState === 'ON';
-                                        console.log(`[MQTT] Scan set to: ${scanValue ? 'ON' : 'OFF'}`);
+                                        logger.log(`[MQTT] Scan set to: ${scanValue ? 'ON' : 'OFF'}`);
                                         if (this.radio && typeof this.radio.writeSettings === 'function' && this.lastSettingsInfo) {
                                             // Use current settings but update scan value
                                             const cha = (this.lastSettingsInfo && typeof this.lastSettingsInfo.channel_a === 'number') ? this.lastSettingsInfo.channel_a : 0;
@@ -349,13 +352,13 @@ class RadioController {
                                         // Optimistically publish the new scan state 
                                         this.mqttReporter.publishStatus(`${this.config.MQTT_TOPIC}/scan`, { scan: scanState });
                                     } else {
-                                        console.warn(`[MQTT] Invalid scan state: ${msg} (expected ON or OFF)`);
+                                        logger.warn(`[MQTT] Invalid scan state: ${msg} (expected ON or OFF)`);
                                     }
                                 } else if (topic === doubleChannelCommandTopic) {
                                     const doubleChannelState = msg.toUpperCase();
                                     if (doubleChannelState === 'ON' || doubleChannelState === 'OFF') {
                                         const doubleChannelValue = doubleChannelState === 'ON' ? 1 : 0;
-                                        console.log(`[MQTT] Dual Watch set to: ${doubleChannelState} (${doubleChannelValue})`);
+                                        logger.log(`[MQTT] Dual Watch set to: ${doubleChannelState} (${doubleChannelValue})`);
                                         if (this.radio && typeof this.radio.writeSettings === 'function' && this.lastSettingsInfo) {
                                             // Use current settings but update double_channel value
                                             const cha = (this.lastSettingsInfo && typeof this.lastSettingsInfo.channel_a === 'number') ? this.lastSettingsInfo.channel_a : 0;
@@ -367,7 +370,7 @@ class RadioController {
                                         // Optimistically publish the new double_channel state 
                                         this.mqttReporter.publishStatus(`${this.config.MQTT_TOPIC}/double_channel`, { double_channel: doubleChannelState });
                                     } else {
-                                        console.warn(`[MQTT] Invalid dual watch state: ${msg} (expected ON or OFF)`);
+                                        logger.warn(`[MQTT] Invalid dual watch state: ${msg} (expected ON or OFF)`);
                                     }
                                 } else if (topic === regionCommandTopic) {
                                     const regionLabel = msg.trim();
@@ -375,20 +378,20 @@ class RadioController {
                                     if (match) {
                                         const regionNumber = parseInt(match[1], 10);
                                         const regionIndex = regionNumber - 1; // Convert to 0-based index
-                                        console.log(`[MQTT] Region set to: ${regionLabel} (index ${regionIndex})`);
+                                        logger.log(`[MQTT] Region set to: ${regionLabel} (index ${regionIndex})`);
                                         if (this.radio && typeof this.radio.setRegion === 'function') {
                                             this.radio.setRegion(regionIndex);
                                         }
                                         // Optimistically publish the new region state 
                                         this.mqttReporter.publishStatus(`${this.config.MQTT_TOPIC}/region_select`, { region: regionLabel });
                                     } else {
-                                        console.warn(`[MQTT] Invalid region format: ${msg} (expected "Region N")`);
+                                        logger.warn(`[MQTT] Invalid region format: ${msg} (expected "Region N")`);
                                     }
                                 } else if (topic === gpsCommandTopic) {
                                     const gpsState = msg.trim().toUpperCase();
                                     if (gpsState === 'ON' || gpsState === 'OFF') {
                                         const enableGps = (gpsState === 'ON');
-                                        console.log(`[MQTT] GPS set to: ${gpsState}`);
+                                        logger.log(`[MQTT] GPS set to: ${gpsState}`);
                                         if (this.radio && typeof this.radio.setGpsEnabled === 'function') {
                                             this.radio.setGpsEnabled(enableGps);
                                         }
@@ -413,17 +416,17 @@ class RadioController {
                                                 timestamp: new Date().toISOString()
                                             };
                                             this.mqttReporter.publishStatus(gpsPositionTopic, waitingPositionData);
-                                            //console.log(`[MQTT] DEBUG: Published initial GPS position data to ${gpsPositionTopic}`);
+                                            //logger.log(`[MQTT] DEBUG: Published initial GPS position data to ${gpsPositionTopic}`);
                                         } else {
-                                            console.log('[MQTT] DEBUG: GPS disabled, publishing disabled state');
+                                            logger.log('[MQTT] DEBUG: GPS disabled, publishing disabled state');
                                             this.publishGpsDisabledState();
                                         }
                                     } else {
-                                        console.warn(`[MQTT] Invalid GPS state: ${msg} (expected ON or OFF)`);
+                                        logger.warn(`[MQTT] Invalid GPS state: ${msg} (expected ON or OFF)`);
                                     }
                                 }
                             } catch (e) {
-                                console.error('[MQTT] Error handling message:', e.message);
+                                logger.error('[MQTT] Error handling message:', e.message);
                             }
                         });
                         this.mqttReporter._vfoHandlerInstalled = true;
@@ -461,7 +464,7 @@ class RadioController {
                         this.radio.getVolumeLevel();
                     } catch (e) {
                         // avoid throwing from a poll call
-                        console.error('[RadioCtl] Error calling getVolumeLevel():', e.message);
+                        logger.error('[RadioCtl] Error calling getVolumeLevel():', e.message);
                     }
                 }
             }

@@ -1,5 +1,8 @@
 'use strict';
 
+// Get logger instance
+const logger = global.logger ? global.logger.getLogger('BBS') : console;
+
 const EventEmitter = require('events');
 const AX25Session = require('./AX25Session');
 const AX25Packet = require('./AX25Packet');
@@ -34,27 +37,27 @@ class BbsServer extends EventEmitter {
         // === Connection Logging Storage ===
         try {
             this.storage = new Storage('./data/bbs-connections.db');
-            console.log('[BBS Server] Connection logging initialized');
+            logger.log('[BBS Server] Connection logging initialized');
         } catch (error) {
-            console.error('[BBS Server] Failed to initialize connection logging:', error);
+            logger.error('[BBS Server] Failed to initialize connection logging:', error);
             this.storage = null;
         }
         
         // === APRS Message Storage Access ===
         try {
             this.aprsMessageStorage = new Storage('./data/aprs-messages.db');
-            console.log('[BBS Server] APRS message storage access initialized');
+            logger.log('[BBS Server] APRS message storage access initialized');
         } catch (error) {
-            console.error('[BBS Server] Failed to initialize APRS message storage access:', error);
+            logger.error('[BBS Server] Failed to initialize APRS message storage access:', error);
             this.aprsMessageStorage = null;
         }
         
         // === Bulletin Storage ===
         try {
             this.bulletinStorage = new Storage('./data/bbs-bulletins.db');
-            console.log('[BBS Server] Bulletin storage initialized');
+            logger.log('[BBS Server] Bulletin storage initialized');
         } catch (error) {
-            console.error('[BBS Server] Failed to initialize bulletin storage:', error);
+            logger.error('[BBS Server] Failed to initialize bulletin storage:', error);
             this.bulletinStorage = null;
         }
         
@@ -83,7 +86,7 @@ class BbsServer extends EventEmitter {
             this.games.set(command, { instance: jokeGame, menuState: 'joke' });
         }
         
-        console.log(`[BBS Server] Initialized ${this.games.size} game commands`);
+        logger.log(`[BBS Server] Initialized ${this.games.size} game commands`);
     }
     
     // Helper function to create session key from addresses
@@ -117,7 +120,7 @@ class BbsServer extends EventEmitter {
                 channel_id: packet.channel_id,
                 data: serialized
             });
-            console.log('[BBS Server] Sent DM (busy) response');
+            logger.log('[BBS Server] Sent DM (busy) response');
         }
     }
     
@@ -132,12 +135,12 @@ class BbsServer extends EventEmitter {
         if (!session) {
             // Check if this station is busy with another server
             if (this.sessionRegistry && !this.sessionRegistry.canCreateSession(sessionKey, 'bbs')) {
-                console.log(`[BBS Session] ${sessionKey} is busy with another server, sending DM`);
+                logger.log(`[BBS Session] ${sessionKey} is busy with another server, sending DM`);
                 this.sendBusyResponse(packet);
                 return null;
             }
             
-            console.log(`[BBS Session] Creating new session for ${sessionKey}`);
+            logger.log(`[BBS Session] Creating new session for ${sessionKey}`);
             session = new AX25Session({ 
                 callsign: this.RADIO_CALLSIGN, 
                 RADIO_CALLSIGN: this.RADIO_CALLSIGN,
@@ -148,7 +151,7 @@ class BbsServer extends EventEmitter {
             
             // Set up session event handlers
             session.on('stateChanged', (state) => {
-                console.log(`[BBS Session] ${sessionKey} state changed to ${state}`);
+                logger.log(`[BBS Session] ${sessionKey} state changed to ${state}`);
                 if (state === AX25Session.ConnectionState.CONNECTED) {
                     // Register session in global registry
                     if (this.sessionRegistry) {
@@ -167,7 +170,7 @@ class BbsServer extends EventEmitter {
                     
                     // Send welcome message with last connection info when session is established
                     const welcomeMessage = this.generateWelcomeMessage(sessionKey, lastConnectionInfo);
-                    console.log(`[BBS Session] Sending welcome message to ${sessionKey}`);
+                    logger.log(`[BBS Session] Sending welcome message to ${sessionKey}`);
                     
                     // Emit welcome message event for web interface
                     this.emit('sessionDataSent', {
@@ -179,7 +182,7 @@ class BbsServer extends EventEmitter {
                     
                     session.send(Buffer.from(welcomeMessage), true); // Use immediate sending
                 } else if (state === AX25Session.ConnectionState.DISCONNECTED) {
-                    console.log(`[BBS Session] Removing disconnected session for ${sessionKey}`);
+                    logger.log(`[BBS Session] Removing disconnected session for ${sessionKey}`);
                     
                     // Unregister session from global registry
                     if (this.sessionRegistry) {
@@ -200,7 +203,7 @@ class BbsServer extends EventEmitter {
             });
             
             session.on('dataReceived', (data) => {
-                console.log(`[BBS Session] ${sessionKey} received ${data.length} bytes: ${data.toString()}`);
+                logger.log(`[BBS Session] ${sessionKey} received ${data.length} bytes: ${data.toString()}`);
                 
                 // Emit data event for web interface
                 this.emit('sessionDataReceived', {
@@ -213,7 +216,7 @@ class BbsServer extends EventEmitter {
                 // Check if YAPP file transfer is active for this session
                 const activeTransfer = this.fileTransfers.get(sessionKey);
                 if (activeTransfer && activeTransfer.state !== 'IDLE') {
-                    console.log(`[BBS Session] YAPP transfer active for ${sessionKey}, skipping normal BBS command processing`);
+                    logger.log(`[BBS Session] YAPP transfer active for ${sessionKey}, skipping normal BBS command processing`);
                     // YAPP module will handle the data through its own handleIncomingData method
                     return;
                 }
@@ -234,7 +237,7 @@ class BbsServer extends EventEmitter {
                     let response = this.processCommand(sessionKey, command, currentMenu);
                     
                     if (response) {
-                        console.log(`[BBS Session] Sending command response to ${sessionKey}`);
+                        logger.log(`[BBS Session] Sending command response to ${sessionKey}`);
                         
                         // Emit data event for web interface
                         this.emit('sessionDataSent', {
@@ -250,12 +253,12 @@ class BbsServer extends EventEmitter {
             });
             
             session.on('uiDataReceived', (data) => {
-                console.log(`[BBS Session] ${sessionKey} received UI data ${data.length} bytes: ${data.toString()}`);
+                logger.log(`[BBS Session] ${sessionKey} received UI data ${data.length} bytes: ${data.toString()}`);
                 // For UI frames, we don't echo back as they're connectionless
             });
             
             session.on('error', (error) => {
-                console.log(`[BBS Session] ${sessionKey} error: ${error}`);
+                logger.log(`[BBS Session] ${sessionKey} error: ${error}`);
             });
             
             this.activeSessions.set(sessionKey, session);
@@ -288,7 +291,7 @@ class BbsServer extends EventEmitter {
             
             return null; // No previous connection found
         } catch (error) {
-            console.error('[BBS Server] Error retrieving last connection info:', error);
+            logger.error('[BBS Server] Error retrieving last connection info:', error);
             return null;
         }
     }
@@ -345,7 +348,7 @@ class BbsServer extends EventEmitter {
     // Connection Logging Methods
     logConnection(sessionKey) {
         if (!this.storage) {
-            console.log('[BBS Server] Storage not available, skipping connection log');
+            logger.log('[BBS Server] Storage not available, skipping connection log');
             return;
         }
         
@@ -373,21 +376,21 @@ class BbsServer extends EventEmitter {
             const storageKey = `connection-${now.getTime()}`;
             
             if (this.storage.save(storageKey, connectionRecord)) {
-                console.log(`[BBS Server] Logged connection from ${sessionKey} at ${localTime}`);
+                logger.log(`[BBS Server] Logged connection from ${sessionKey} at ${localTime}`);
                 
                 // Maintain only the last 100 connections for performance
                 this.cleanupOldConnections();
             } else {
-                console.error(`[BBS Server] Failed to log connection from ${sessionKey}`);
+                logger.error(`[BBS Server] Failed to log connection from ${sessionKey}`);
             }
         } catch (error) {
-            console.error('[BBS Server] Error logging connection:', error);
+            logger.error('[BBS Server] Error logging connection:', error);
         }
     }
     
     updateConnectionLogWithStats(sessionKey, sessionStats) {
         if (!this.storage || !sessionStats) {
-            console.log('[BBS Server] Storage not available or no stats, skipping connection log update');
+            logger.log('[BBS Server] Storage not available or no stats, skipping connection log update');
             return;
         }
         
@@ -407,15 +410,15 @@ class BbsServer extends EventEmitter {
                     record.connectionDuration = sessionStats.connectionDuration;
                     
                     if (this.storage.save(key, record)) {
-                        console.log(`[BBS Server] Updated connection log for ${sessionKey} with session stats: ${sessionStats.packetsSent}/${sessionStats.packetsReceived} packets, ${sessionStats.bytesSent}/${sessionStats.bytesReceived} bytes, ${sessionStats.connectionDuration}s duration`);
+                        logger.log(`[BBS Server] Updated connection log for ${sessionKey} with session stats: ${sessionStats.packetsSent}/${sessionStats.packetsReceived} packets, ${sessionStats.bytesSent}/${sessionStats.bytesReceived} bytes, ${sessionStats.connectionDuration}s duration`);
                     } else {
-                        console.error(`[BBS Server] Failed to update connection log for ${sessionKey} with session stats`);
+                        logger.error(`[BBS Server] Failed to update connection log for ${sessionKey} with session stats`);
                     }
                     break; // Only update the most recent connection
                 }
             }
         } catch (error) {
-            console.error('[BBS Server] Error updating connection log with stats:', error);
+            logger.error('[BBS Server] Error updating connection log with stats:', error);
         }
     }
     
@@ -435,10 +438,10 @@ class BbsServer extends EventEmitter {
                     this.storage.delete(key);
                 }
                 
-                console.log(`[BBS Server] Cleaned up ${keysToDelete.length} old connection records`);
+                logger.log(`[BBS Server] Cleaned up ${keysToDelete.length} old connection records`);
             }
         } catch (error) {
-            console.error('[BBS Server] Error cleaning up old connections:', error);
+            logger.error('[BBS Server] Error cleaning up old connections:', error);
         }
     }
     
@@ -483,7 +486,7 @@ class BbsServer extends EventEmitter {
             
             return output;
         } catch (error) {
-            console.error('[BBS Server] Error retrieving last connections:', error);
+            logger.error('[BBS Server] Error retrieving last connections:', error);
             return `Error retrieving connection history.\r\n`;
         }
     }
@@ -531,7 +534,7 @@ class BbsServer extends EventEmitter {
             
             return output;
         } catch (error) {
-            console.error('[BBS Server] Error retrieving APRS messages:', error);
+            logger.error('[BBS Server] Error retrieving APRS messages:', error);
             return `Error retrieving APRS message history.\r\n\r\n`;
         }
     }
@@ -594,13 +597,13 @@ class BbsServer extends EventEmitter {
             const storageKey = `bulletin-${bulletin.id}`;
             
             if (this.bulletinStorage.save(storageKey, bulletin)) {
-                console.log(`[BBS Bulletin] Created bulletin ${bulletin.id} by ${callsign}: "${message}"`);
+                logger.log(`[BBS Bulletin] Created bulletin ${bulletin.id} by ${callsign}: "${message}"`);
                 return { success: true, bulletin: bulletin };
             } else {
                 return { success: false, error: 'Failed to save bulletin' };
             }
         } catch (error) {
-            console.error('[BBS Bulletin] Error creating bulletin:', error);
+            logger.error('[BBS Bulletin] Error creating bulletin:', error);
             return { success: false, error: 'Internal error creating bulletin' };
         }
     }
@@ -624,13 +627,13 @@ class BbsServer extends EventEmitter {
             }
             
             if (this.bulletinStorage.delete(storageKey)) {
-                console.log(`[BBS Bulletin] Deleted bulletin ${bulletinId} by ${callsign}`);
+                logger.log(`[BBS Bulletin] Deleted bulletin ${bulletinId} by ${callsign}`);
                 return { success: true };
             } else {
                 return { success: false, error: 'Failed to delete bulletin' };
             }
         } catch (error) {
-            console.error('[BBS Bulletin] Error deleting bulletin:', error);
+            logger.error('[BBS Bulletin] Error deleting bulletin:', error);
             return { success: false, error: 'Internal error deleting bulletin' };
         }
     }
@@ -659,7 +662,7 @@ class BbsServer extends EventEmitter {
             
             return bulletins;
         } catch (error) {
-            console.error('[BBS Bulletin] Error retrieving bulletins by callsign:', error);
+            logger.error('[BBS Bulletin] Error retrieving bulletins by callsign:', error);
             return [];
         }
     }
@@ -688,7 +691,7 @@ class BbsServer extends EventEmitter {
             
             return bulletins;
         } catch (error) {
-            console.error('[BBS Bulletin] Error retrieving all bulletins:', error);
+            logger.error('[BBS Bulletin] Error retrieving all bulletins:', error);
             return [];
         }
     }
@@ -708,15 +711,15 @@ class BbsServer extends EventEmitter {
                 if (bulletin && new Date(bulletin.expireTime) <= now) {
                     this.bulletinStorage.delete(key);
                     deletedCount++;
-                    console.log(`[BBS Bulletin] Expired bulletin ${bulletin.id} by ${bulletin.callsign}`);
+                    logger.log(`[BBS Bulletin] Expired bulletin ${bulletin.id} by ${bulletin.callsign}`);
                 }
             }
             
             if (deletedCount > 0) {
-                console.log(`[BBS Bulletin] Cleaned up ${deletedCount} expired bulletin${deletedCount !== 1 ? 's' : ''}`);
+                logger.log(`[BBS Bulletin] Cleaned up ${deletedCount} expired bulletin${deletedCount !== 1 ? 's' : ''}`);
             }
         } catch (error) {
-            console.error('[BBS Bulletin] Error cleaning up expired bulletins:', error);
+            logger.error('[BBS Bulletin] Error cleaning up expired bulletins:', error);
         }
     }
     
@@ -880,7 +883,7 @@ class BbsServer extends EventEmitter {
                 session.send(Buffer.from(response), true);
                 // Disconnect after a short delay to ensure message is sent
                 setTimeout(() => {
-                    console.log(`[BBS Session] User ${sessionKey} requested disconnect`);
+                    logger.log(`[BBS Session] User ${sessionKey} requested disconnect`);
                     session.disconnect();
                 }, 100);
             }
@@ -1109,12 +1112,12 @@ class BbsServer extends EventEmitter {
             // Ensure pubfiles directory exists
             if (!fs.existsSync(this.pubFilesPath)) {
                 fs.mkdirSync(this.pubFilesPath, { recursive: true });
-                console.log(`[BBS Files] Created pubfiles directory: ${this.pubFilesPath}`);
+                logger.log(`[BBS Files] Created pubfiles directory: ${this.pubFilesPath}`);
             }
             
-            console.log(`[BBS Files] File system initialized - pubfiles path: ${this.pubFilesPath}`);
+            logger.log(`[BBS Files] File system initialized - pubfiles path: ${this.pubFilesPath}`);
         } catch (error) {
-            console.error('[BBS Files] Error initializing file system:', error);
+            logger.error('[BBS Files] Error initializing file system:', error);
         }
     }
     
@@ -1161,7 +1164,7 @@ class BbsServer extends EventEmitter {
             
             return files;
         } catch (error) {
-            console.error('[BBS Files] Error scanning files:', error);
+            logger.error('[BBS Files] Error scanning files:', error);
             return [];
         }
     }
@@ -1239,15 +1242,15 @@ class BbsServer extends EventEmitter {
             
             // Set up transfer event handlers
             yappTransfer.on('transferStarted', (info) => {
-                console.log(`[BBS YAPP] Transfer started for ${sessionKey}: ${info.filename}`);
+                logger.log(`[BBS YAPP] Transfer started for ${sessionKey}: ${info.filename}`);
             });
             
             yappTransfer.on('transferProgress', (progress) => {
-                console.log(`[BBS YAPP] Transfer progress for ${sessionKey}: ${progress.percentage}% (${progress.bytesTransferred}/${progress.fileSize} bytes)`);
+                logger.log(`[BBS YAPP] Transfer progress for ${sessionKey}: ${progress.percentage}% (${progress.bytesTransferred}/${progress.fileSize} bytes)`);
             });
             
             yappTransfer.on('transferCompleted', (stats) => {
-                console.log(`[BBS YAPP] Transfer completed for ${sessionKey}: ${stats.filename} (${stats.bytesTransferred} bytes in ${stats.elapsedTime}s)`);
+                logger.log(`[BBS YAPP] Transfer completed for ${sessionKey}: ${stats.filename} (${stats.bytesTransferred} bytes in ${stats.elapsedTime}s)`);
                 this.fileTransfers.delete(sessionKey);
                 
                 // Send completion message
@@ -1259,7 +1262,7 @@ class BbsServer extends EventEmitter {
             });
             
             yappTransfer.on('transferCancelled', (info) => {
-                console.log(`[BBS YAPP] Transfer cancelled for ${sessionKey}: ${info.reason}`);
+                logger.log(`[BBS YAPP] Transfer cancelled for ${sessionKey}: ${info.reason}`);
                 this.fileTransfers.delete(sessionKey);
                 
                 const cancelMsg = `\r\nFile transfer cancelled: ${info.reason}\r\n` + this.getMainMenu();
@@ -1268,7 +1271,7 @@ class BbsServer extends EventEmitter {
             });
             
             yappTransfer.on('transferAborted', (info) => {
-                console.log(`[BBS YAPP] Transfer aborted for ${sessionKey}: ${info.reason}`);
+                logger.log(`[BBS YAPP] Transfer aborted for ${sessionKey}: ${info.reason}`);
                 this.fileTransfers.delete(sessionKey);
                 
                 const abortMsg = `\r\nFile transfer aborted: ${info.reason}\r\n` + this.getMainMenu();
@@ -1292,7 +1295,7 @@ class BbsServer extends EventEmitter {
             */
             
         } catch (error) {
-            console.error(`[BBS YAPP] Error starting file transfer for ${sessionKey}:`, error);
+            logger.error(`[BBS YAPP] Error starting file transfer for ${sessionKey}:`, error);
             return `Error starting file transfer: ${error.message}\r\n` + this.getMainMenu();
         }
     }
@@ -1335,15 +1338,15 @@ class BbsServer extends EventEmitter {
             
             // Set up transfer event handlers
             yappTransfer.on('transferStarted', (info) => {
-                console.log(`[BBS YAPP] Transfer started for ${sessionKey}: ${info.filename}`);
+                logger.log(`[BBS YAPP] Transfer started for ${sessionKey}: ${info.filename}`);
             });
             
             yappTransfer.on('transferProgress', (progress) => {
-                console.log(`[BBS YAPP] Transfer progress for ${sessionKey}: ${progress.percentage}% (${progress.bytesTransferred}/${progress.fileSize} bytes)`);
+                logger.log(`[BBS YAPP] Transfer progress for ${sessionKey}: ${progress.percentage}% (${progress.bytesTransferred}/${progress.fileSize} bytes)`);
             });
             
             yappTransfer.on('transferCompleted', (stats) => {
-                console.log(`[BBS YAPP] Transfer completed for ${sessionKey}: ${stats.filename} (${stats.bytesTransferred} bytes in ${stats.elapsedTime}s)`);
+                logger.log(`[BBS YAPP] Transfer completed for ${sessionKey}: ${stats.filename} (${stats.bytesTransferred} bytes in ${stats.elapsedTime}s)`);
                 this.fileTransfers.delete(sessionKey);
                 
                 // Send completion message
@@ -1355,7 +1358,7 @@ class BbsServer extends EventEmitter {
             });
             
             yappTransfer.on('transferCancelled', (info) => {
-                console.log(`[BBS YAPP] Transfer cancelled for ${sessionKey}: ${info.reason}`);
+                logger.log(`[BBS YAPP] Transfer cancelled for ${sessionKey}: ${info.reason}`);
                 this.fileTransfers.delete(sessionKey);
                 
                 const cancelMsg = `\r\nFile transfer cancelled: ${info.reason}\r\n` + this.getMainMenu();
@@ -1364,7 +1367,7 @@ class BbsServer extends EventEmitter {
             });
             
             yappTransfer.on('transferAborted', (info) => {
-                console.log(`[BBS YAPP] Transfer aborted for ${sessionKey}: ${info.reason}`);
+                logger.log(`[BBS YAPP] Transfer aborted for ${sessionKey}: ${info.reason}`);
                 this.fileTransfers.delete(sessionKey);
                 
                 const abortMsg = `\r\nFile transfer aborted: ${info.reason}\r\n` + this.getMainMenu();
@@ -1388,7 +1391,7 @@ class BbsServer extends EventEmitter {
                    `Transfer will begin shortly...\r\n`;
             */
         } catch (error) {
-            console.error(`[BBS YAPP] Error starting file transfer for ${sessionKey}:`, error);
+            logger.error(`[BBS YAPP] Error starting file transfer for ${sessionKey}:`, error);
             return `Error starting file transfer: ${error.message}\r\n` + this.getMainMenu();
         }
     }
@@ -1413,14 +1416,14 @@ class BbsServer extends EventEmitter {
         try {
             // Cancel any active file transfers
             for (const [sessionKey, transfer] of this.fileTransfers) {
-                console.log(`[BBS Server] Cancelling file transfer for ${sessionKey}`);
+                logger.log(`[BBS Server] Cancelling file transfer for ${sessionKey}`);
                 transfer.cancel('BBS shutting down');
             }
             this.fileTransfers.clear();
             
             // Close all active sessions
             for (const [sessionKey, session] of this.activeSessions) {
-                console.log(`[BBS Server] Closing session for ${sessionKey}`);
+                logger.log(`[BBS Server] Closing session for ${sessionKey}`);
                 session.disconnect();
             }
             this.activeSessions.clear();
@@ -1428,10 +1431,10 @@ class BbsServer extends EventEmitter {
             // Close storage
             if (this.storage) {
                 this.storage.close();
-                console.log('[BBS Server] Storage connection closed');
+                logger.log('[BBS Server] Storage connection closed');
             }
         } catch (error) {
-            console.error('[BBS Server] Error during cleanup:', error);
+            logger.error('[BBS Server] Error during cleanup:', error);
         }
     }
     
@@ -1445,12 +1448,12 @@ class BbsServer extends EventEmitter {
             // Check if this is a session-related packet (SABM, SABME, I-frame, etc.)
             if (packet.isSessionPacket()) {
                 // Handle session management
-                console.log('[BBS Session] Processing session packet');
+                logger.log('[BBS Session] Processing session packet');
                 const session = this.getOrCreateBbsSession(packet);
                 if (session) {
                     session.receive(packet);
                 } else {
-                    console.log('[BBS Session] Failed to create/get session for packet');
+                    logger.log('[BBS Session] Failed to create/get session for packet');
                 }
             } else {
                 // Handle U-frame echoing for non-session packets
@@ -1470,22 +1473,22 @@ class BbsServer extends EventEmitter {
                         // Serialize replyPacket with header and addresses
                         const serialized = replyPacket.ToByteArray ? replyPacket.ToByteArray() : (replyPacket.toByteArray ? replyPacket.toByteArray() : null);
                         if (!serialized) {
-                            console.warn('[BBS Server] AX.25 packet serialization failed:', replyPacket);
+                            logger.warn('[BBS Server] AX.25 packet serialization failed:', replyPacket);
                         } else if (typeof this.radio.sendTncFrame !== 'function') {
-                            console.warn('[BBS Server] radio.sendTncFrame not implemented.');
+                            logger.warn('[BBS Server] radio.sendTncFrame not implemented.');
                         } else {
                             this.radio.sendTncFrame({
                                 channel_id: replyPacket.channel_id,
                                 data: serialized
                             });
-                            console.log('[BBS Server] Echoed AX.25 U-frame packet back to sender.');
+                            logger.log('[BBS Server] Echoed AX.25 U-frame packet back to sender.');
                         }
                     }
                 } else {
                     if (!isUFrame) {
-                        console.log('[BBS Server] AX.25 packet addressed to our station - not echoing (not a U-frame)');
+                        logger.log('[BBS Server] AX.25 packet addressed to our station - not echoing (not a U-frame)');
                     } else {
-                        console.log('[BBS Server] AX.25 packet addressed to our station - not echoing (no payload data)');
+                        logger.log('[BBS Server] AX.25 packet addressed to our station - not echoing (no payload data)');
                     }
                 }
             }

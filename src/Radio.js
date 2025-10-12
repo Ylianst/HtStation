@@ -1,4 +1,7 @@
 // This module provides a simple class to interact with a GAIA-enabled radio
+
+// Get logger instance
+const logger = global.logger ? global.logger.getLogger('Radio') : console;
 // like the BTech UV-Pro, RadioOddity GA-5WB, Vero VR-N76, Vero VR-N7500, Vero VR-N7600
 // by wrapping the functionality of the GaiaClient.
 
@@ -157,9 +160,9 @@ class Radio extends EventEmitter {
         // Update transmit allowed status based on callsign validity
         this._transmitAllowed = this._validateCallsign(callsign);
         if (!this._transmitAllowed) {
-            console.warn('[Radio] TRANSMISSION DISABLED: No valid callsign configured');
+            logger.warn('[Radio] TRANSMISSION DISABLED: No valid callsign configured');
         } else {
-            console.log(`[Radio] Transmission enabled for callsign: ${callsign}`);
+            logger.log(`[Radio] Transmission enabled for callsign: ${callsign}`);
         }
     }
 
@@ -226,14 +229,14 @@ class Radio extends EventEmitter {
      */
     writeSettings(cha, chb, xdouble_channel = 0, xscan = false, xsquelch = 0) {
         if (!this.settings || !this.settings.rawData || !Array.isArray(this.settings.rawData)) {
-            console.error('[Radio] Cannot write settings: settings not loaded');
+            logger.error('[Radio] Cannot write settings: settings not loaded');
             return;
         }
         try {
             // rawData is an Array of bytes; C# copies rawData[5..] into buf
             const raw = this.settings.rawData;
             if (raw.length <= 5) {
-                console.error('[Radio] Invalid settings raw data length');
+                logger.error('[Radio] Invalid settings raw data length');
                 return;
             }
             const buf = Buffer.from(raw.slice(5));
@@ -253,11 +256,11 @@ class Radio extends EventEmitter {
 
             // Send WRITE_SETTINGS (RadioBasicCommand.WRITE_SETTINGS)
             this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.WRITE_SETTINGS, buf);
-            console.log(`[Radio] Sent WRITE_SETTINGS cha=${cha} chb=${chb} dbl=${xdouble_channel} scan=${xscan} squelch=${xsquelch}`);
+            logger.log(`[Radio] Sent WRITE_SETTINGS cha=${cha} chb=${chb} dbl=${xdouble_channel} scan=${xscan} squelch=${xsquelch}`);
             // Optionally request READ_SETTINGS to refresh local cache
             setTimeout(() => this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.READ_SETTINGS, null), 200);
         } catch (e) {
-            console.error('[Radio] Error in writeSettings:', e.message);
+            logger.error('[Radio] Error in writeSettings:', e.message);
         }
     }
     
@@ -282,16 +285,16 @@ class Radio extends EventEmitter {
     sendTncFrame(opts) {
         // Check if transmission is allowed
         if (!this.TransmitAllowed) {
-            console.error('[Radio] sendTncFrame: TRANSMISSION BLOCKED - No valid callsign configured');
+            logger.error('[Radio] sendTncFrame: TRANSMISSION BLOCKED - No valid callsign configured');
             return;
         }
         
         // Print the full frame data in HEX before fragmenting
         const data = Buffer.isBuffer(opts.data) ? opts.data : Buffer.from(opts.data);
-        //console.log(`[Radio] sendTncFrame() full data: ${bytesToHex(data)}`);
+        //logger.log(`[Radio] sendTncFrame() full data: ${bytesToHex(data)}`);
         const MAX_MTU = 50;
         if (!opts || typeof opts.channel_id !== 'number' || !opts.data) {
-            console.error('[Radio] sendTncFrame: Invalid arguments');
+            logger.error('[Radio] sendTncFrame: Invalid arguments');
             return;
         }
         const channel_id = opts.channel_id;
@@ -310,7 +313,7 @@ class Radio extends EventEmitter {
                 fragData,
                 Buffer.from([channel_id])
             ]);
-            //console.log(`[Radio] Queued TNC frame for send: ${bytesToHex(packet)}`);
+            //logger.log(`[Radio] Queued TNC frame for send: ${bytesToHex(packet)}`);
             this._tncOutboundQueue.push(packet);
             offset += fragLen;
             fragment_id++;
@@ -357,9 +360,9 @@ class Radio extends EventEmitter {
         */
        
         // Debug: Print the packet being sent in HEX and channel information
-        //console.log(`[Radio] _processTncQueue sending packet (HEX): ${Array.from(this._tncPendingPacket).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' ')}`);
-        //console.log(`[Radio] _processTncQueue sending packet (length): ${this._tncPendingPacket.length} bytes`);
-        //console.log(`[Radio] _processTncQueue sending packet (channel): ${channelInfo}`);
+        //logger.log(`[Radio] _processTncQueue sending packet (HEX): ${Array.from(this._tncPendingPacket).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' ')}`);
+        //logger.log(`[Radio] _processTncQueue sending packet (length): ${this._tncPendingPacket.length} bytes`);
+        //logger.log(`[Radio] _processTncQueue sending packet (channel): ${channelInfo}`);
         
         this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.HT_SEND_DATA, this._tncPendingPacket);
         // Note: _tncSending remains true and packet stays in queue until we get response
@@ -506,7 +509,7 @@ class Radio extends EventEmitter {
     }
 
     onReceivedData(value) {
-        //console.log(`[Radio] Received data: ${bytesToHex(value)}`);
+        //logger.log(`[Radio] Received data: ${bytesToHex(value)}`);
         this.emit('rawCommand', value);
 
         const commandGroup = getShort(value, 0);
@@ -514,7 +517,7 @@ class Radio extends EventEmitter {
             const command = getShort(value, 2) & 0x7FFF;
             const payload = value.slice(4);
 
-            //console.log(`[Radio] Received command: ${Object.keys(RadioBasicCommand).find(key => RadioBasicCommand[key] === command)}`);
+            //logger.log(`[Radio] Received command: ${Object.keys(RadioBasicCommand).find(key => RadioBasicCommand[key] === command)}`);
 
             switch (command) {
                 case RadioBasicCommand.HT_SEND_DATA:
@@ -524,7 +527,7 @@ class Radio extends EventEmitter {
                     for (const [key, val] of Object.entries(RadioCommandErrors)) {
                         if (val === errorCode) { errorName = key; break; }
                     }
-                    console.log(`[Radio] HT_SEND_DATA response: errorCode=${errorCode} (${errorName})`);
+                    logger.log(`[Radio] HT_SEND_DATA response: errorCode=${errorCode} (${errorName})`);
                     
                     if (errorCode === RadioCommandErrors.SUCCESS) {
                         // Packet sent successfully - remove from queue
@@ -540,13 +543,13 @@ class Radio extends EventEmitter {
                         }
                     } else if (errorCode === RadioCommandErrors.INCORRECT_STATE) {
                         // Radio not ready - keep packet in queue, will retry on HT_STATUS_CHANGED
-                        console.log(`[Radio] Radio in incorrect state for transmission - packet will be retried when radio is ready`);
+                        logger.log(`[Radio] Radio in incorrect state for transmission - packet will be retried when radio is ready`);
                         this._tncPendingPacket = null;
                         this._tncSending = false;
                         // Don't process queue now - wait for HT_STATUS_CHANGED notification
                     } else {
                         // Other errors - could be retried or discarded based on error type
-                        console.warn(`[Radio] HT_SEND_DATA failed with error ${errorCode} (${errorName}) - removing packet from queue`);
+                        logger.warn(`[Radio] HT_SEND_DATA failed with error ${errorCode} (${errorName}) - removing packet from queue`);
                         if (this._tncPendingPacket && this._tncOutboundQueue.length > 0) {
                             this._tncOutboundQueue.shift(); // Remove the failed packet
                             this._tncPendingPacket = null;
@@ -608,25 +611,25 @@ class Radio extends EventEmitter {
                             case 1: // BATTERY_LEVEL
                                 const batteryLevel = value[7];
                                 this.emit('infoUpdate', { type: 'BatteryLevel', value: batteryLevel });
-                                console.log(`[Radio] BatteryLevel: ${batteryLevel}`);
+                                logger.log(`[Radio] BatteryLevel: ${batteryLevel}`);
                                 break;
                             case 2: // BATTERY_VOLTAGE
                                 const batteryVoltage = getShort(value, 7) / 1000;
                                 this.emit('infoUpdate', { type: 'BatteryVoltage', value: batteryVoltage });
-                                console.log(`[Radio] BatteryVoltage: ${batteryVoltage}`);
+                                logger.log(`[Radio] BatteryVoltage: ${batteryVoltage}`);
                                 break;
                             case 3: // RC_BATTERY_LEVEL
                                 const rcBatteryLevel = value[7];
                                 this.emit('infoUpdate', { type: 'RcBatteryLevel', value: rcBatteryLevel });
-                                console.log(`[Radio] RcBatteryLevel: ${rcBatteryLevel}`);
+                                logger.log(`[Radio] RcBatteryLevel: ${rcBatteryLevel}`);
                                 break;
                             case 4: // BATTERY_LEVEL_AS_PERCENTAGE
                                 const batteryPercent = value[7];
                                 this.emit('infoUpdate', { type: 'BatteryAsPercentage', value: batteryPercent });
-                                //console.log(`[Radio] BatteryAsPercentage: ${batteryPercent}`);
+                                //logger.log(`[Radio] BatteryAsPercentage: ${batteryPercent}`);
                                 break;
                             default:
-                                console.log(`[Radio] Unexpected Power Status: ${powerStatus}`);
+                                logger.log(`[Radio] Unexpected Power Status: ${powerStatus}`);
                                 break;
                         }
                     }
@@ -634,7 +637,7 @@ class Radio extends EventEmitter {
                 }
                 case RadioBasicCommand.EVENT_NOTIFICATION:
                     const notificationType = payload[0];
-                    //console.log(`[Radio] Received notification: ${Object.keys(RadioNotification).find(key => RadioNotification[key] === notificationType)}`);
+                    //logger.log(`[Radio] Received notification: ${Object.keys(RadioNotification).find(key => RadioNotification[key] === notificationType)}`);
                     switch (notificationType) {
                         case RadioNotification.HT_STATUS_CHANGED:
                             // Decode HT status using the C# logic
@@ -733,11 +736,11 @@ class Radio extends EventEmitter {
                                 this.gpsLock--; // Decrease the GPS lock counter
                             }
                             this.position.locked = (this.gpsLock === 0);
-                            console.log(`[Radio] GPS Position update - Locked: ${this.position.locked}, Lat: ${this.position.latitude}, Lng: ${this.position.longitude}`);
+                            logger.log(`[Radio] GPS Position update - Locked: ${this.position.locked}, Lat: ${this.position.latitude}, Lng: ${this.position.longitude}`);
                             this.emit('positionUpdate', this.position);
                             break;
                         default:
-                            console.warn(`[Radio] Unhandled notification type: ${notificationType}`);
+                            logger.warn(`[Radio] Unhandled notification type: ${notificationType}`);
                     }
                     break;
                 case RadioBasicCommand.GET_VOLUME:
@@ -745,16 +748,16 @@ class Radio extends EventEmitter {
                     this.emit('infoUpdate', { type: 'Volume', value: this.volume });
                     break;
                 default:
-                    console.warn(`[Radio] Unhandled basic command: ${command}`);
+                    logger.warn(`[Radio] Unhandled basic command: ${command}`);
             }
         } else {
-            console.warn(`[Radio] Unhandled command group: ${commandGroup}`);
+            logger.warn(`[Radio] Unhandled command group: ${commandGroup}`);
         }
     }
 
     sendCommand(group, command, data) {
         if (this.state !== RadioState.CONNECTED) {
-            console.error('[Radio] Not connected to send command.');
+            logger.error('[Radio] Not connected to send command.');
             return;
         }
 
@@ -772,7 +775,7 @@ class Radio extends EventEmitter {
             } else if (data instanceof Uint8Array || data instanceof ArrayBuffer) {
                 payload = new Uint8Array(data);
             } else {
-                console.error('[Radio] Invalid data type for command payload.');
+                logger.error('[Radio] Invalid data type for command payload.');
                 return;
             }
         }
@@ -790,7 +793,7 @@ class Radio extends EventEmitter {
 
     setVolumeLevel(level) {
         if (level < 0 || level > 15) {
-            console.error('[Radio] Volume level must be between 0 and 15.');
+            logger.error('[Radio] Volume level must be between 0 and 15.');
             return;
         }
         this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.SET_VOLUME, level);
@@ -798,23 +801,23 @@ class Radio extends EventEmitter {
 
     setRegion(region) {
         if (typeof region !== 'number' || !Number.isInteger(region)) {
-            console.error('[Radio] Region must be an integer.');
+            logger.error('[Radio] Region must be an integer.');
             return;
         }
         
         // Validate region against region_count from DevInfo (typically 0-5 for region_count=6)
         const maxRegion = (this.info && typeof this.info.region_count === 'number') ? this.info.region_count - 1 : 5;
         if (region < 0 || region > maxRegion) {
-            console.error(`[Radio] Region must be between 0 and ${maxRegion} (region_count: ${this.info ? this.info.region_count : 'unknown'}).`);
+            logger.error(`[Radio] Region must be between 0 and ${maxRegion} (region_count: ${this.info ? this.info.region_count : 'unknown'}).`);
             return;
         }
         
         this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.SET_REGION, region);
-        console.log(`[Radio] Set region to: ${region}`);
+        logger.log(`[Radio] Set region to: ${region}`);
         
         // After changing region, reload all channels since they may be different
         if (this.loadChannels && this.info && typeof this.info.channel_count === 'number') {
-            console.log('[Radio] Reloading channels after region change...');
+            logger.log('[Radio] Reloading channels after region change...');
             this.channels = new Array(this.info.channel_count);
             for (let i = 0; i < this.info.channel_count; ++i) {
                 this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.READ_RF_CH, i);
@@ -842,7 +845,7 @@ class Radio extends EventEmitter {
             }
             
             if (this.gpsEnabled) {
-                console.log('[Radio] Enabling GPS position notifications');
+                logger.log('[Radio] Enabling GPS position notifications');
                 this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.REGISTER_NOTIFICATION, RadioNotification.POSITION_CHANGE);
                 
                 // Start GPS lock timeout checker (runs every 5 seconds)
@@ -850,7 +853,7 @@ class Radio extends EventEmitter {
                     this.checkGpsLockTimeout();
                 }, 5000);
             } else {
-                console.log('[Radio] Disabling GPS position notifications');
+                logger.log('[Radio] Disabling GPS position notifications');
                 this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.CANCEL_NOTIFICATION, RadioNotification.POSITION_CHANGE);
             }
         }
@@ -868,7 +871,7 @@ class Radio extends EventEmitter {
         if (timeSinceLastUpdate > thirtySecondsMs) {
             // GPS lock has timed out
             if (this.gpsLock === 0) {
-                console.log('[Radio] GPS lock timeout - setting lock to false');
+                logger.log('[Radio] GPS lock timeout - setting lock to false');
                 this.gpsLock = 1; // Set to unlocked
                 
                 // Update position lock status and emit update
@@ -1004,7 +1007,7 @@ class Radio extends EventEmitter {
      */
     setAutoReconnectEnabled(enabled) {
         this._autoReconnectEnabled = enabled;
-        console.log(`[Radio] Auto-reconnection ${enabled ? 'enabled' : 'disabled'}`);
+        logger.log(`[Radio] Auto-reconnection ${enabled ? 'enabled' : 'disabled'}`);
         
         // If disabling and there's a pending reconnect, cancel it
         if (!enabled && this._reconnectTimer) {
@@ -1023,7 +1026,7 @@ class Radio extends EventEmitter {
             clearTimeout(this._reconnectTimer);
         }
         
-        console.log(`[Radio] Scheduling reconnection attempt in ${this._reconnectInterval / 1000} seconds...`);
+        logger.log(`[Radio] Scheduling reconnection attempt in ${this._reconnectInterval / 1000} seconds...`);
         
         this._reconnectTimer = setTimeout(() => {
             this._attemptReconnect();
@@ -1048,17 +1051,17 @@ class Radio extends EventEmitter {
             return;
         }
         
-        console.log('[Radio] Attempting automatic reconnection...');
+        logger.log('[Radio] Attempting automatic reconnection...');
         
         try {
             await this.connect(this.macAddress);
-            console.log('[Radio] Automatic reconnection successful!');
+            logger.log('[Radio] Automatic reconnection successful!');
             
             // Clear the manual disconnect flag since we successfully reconnected
             this._isManualDisconnect = false;
             
         } catch (error) {
-            console.log(`[Radio] Automatic reconnection failed: ${error.message}`);
+            logger.log(`[Radio] Automatic reconnection failed: ${error.message}`);
             
             // Schedule another reconnection attempt if auto-reconnect is still enabled
             if (this._autoReconnectEnabled) {
@@ -1071,7 +1074,7 @@ class Radio extends EventEmitter {
      * Disconnect from the radio manually (disables auto-reconnection temporarily)
      */
     disconnect() {
-        console.log('[Radio] Manual disconnect requested');
+        logger.log('[Radio] Manual disconnect requested');
         this._isManualDisconnect = true;
         
         // Clear any pending reconnection timer

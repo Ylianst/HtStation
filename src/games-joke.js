@@ -1,5 +1,8 @@
 'use strict';
 
+// Get logger instance
+const logger = global.logger ? global.logger.getLogger('Joke') : console;
+
 const fs = require('fs');
 const path = require('path');
 
@@ -18,9 +21,9 @@ class JokeGame {
             this.jokes = jokesData.split('\n')
                 .map(joke => joke.trim())
                 .filter(joke => joke.length > 0);
-            console.log(`[Joke Game] Loaded ${this.jokes.length} jokes`);
+            logger.log(`[Joke Game] Loaded ${this.jokes.length} jokes`);
         } catch (error) {
-            console.error('[Joke Game] Failed to load jokes:', error);
+            logger.error('[Joke Game] Failed to load jokes:', error);
             this.jokes = ['Why did the computer go to the doctor? It had a virus!'];
         }
     }

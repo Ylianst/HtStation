@@ -6,6 +6,9 @@ const path = require('path');
 const WebSocket = require('ws');
 const os = require('os');
 
+// Get logger instance
+const logger = global.logger ? global.logger.getLogger('WebServer') : console;
+
 class WebServer {
     constructor(config, radio, bbsServer, aprsHandler, winlinkServer) {
         this.config = config;
@@ -57,19 +60,19 @@ class WebServer {
                 
                 // Handle WebSocket connections
                 this.wsServer.on('connection', (ws, req) => {
-                    console.log(`[WebServer] New WebSocket connection from ${req.socket.remoteAddress}`);
+                    logger.log(`[WebServer] New WebSocket connection from ${req.socket.remoteAddress}`);
                     this.clients.add(ws);
                     
                     // Send initial data to new client
                     this.sendInitialData(ws);
                     
                     ws.on('close', () => {
-                        console.log('[WebServer] WebSocket connection closed');
+                        logger.log('[WebServer] WebSocket connection closed');
                         this.clients.delete(ws);
                     });
                     
                     ws.on('error', (error) => {
-                        console.error('[WebServer] WebSocket error:', error);
+                        logger.error('[WebServer] WebSocket error:', error);
                         this.clients.delete(ws);
                     });
                     
@@ -78,25 +81,25 @@ class WebServer {
                             const data = JSON.parse(message);
                             this.handleWebSocketMessage(ws, data);
                         } catch (error) {
-                            console.error('[WebServer] Invalid WebSocket message:', error);
+                            logger.error('[WebServer] Invalid WebSocket message:', error);
                         }
                     });
                 });
                 
                 // Start the server
                 this.httpServer.listen(port, () => {
-                    console.log(`[WebServer] HTTP server started on port ${port}`);
-                    console.log(`[WebServer] Dashboard available at http://localhost:${port}`);
+                    logger.log(`[WebServer] HTTP server started on port ${port}`);
+                    logger.log(`[WebServer] Dashboard available at http://localhost:${port}`);
                     resolve();
                 });
                 
                 this.httpServer.on('error', (error) => {
-                    //console.error('[WebServer] HTTP server error:', error);
+                    //logger.error('[WebServer] HTTP server error:', error);
                     reject(error);
                 });
                 
             } catch (error) {
-                console.error('[WebServer] Failed to start web server:', error);
+                logger.error('[WebServer] Failed to start web server:', error);
                 reject(error);
             }
         });
@@ -109,7 +112,7 @@ class WebServer {
         if (this.httpServer) {
             this.httpServer.close();
         }
-        console.log('[WebServer] Web server stopped');
+        logger.log('[WebServer] Web server stopped');
     }
     
     setupEventListeners() {
@@ -203,7 +206,7 @@ class WebServer {
                 this.handleMailComposition(ws, data);
                 break;
             default:
-                console.log('[WebServer] Unknown WebSocket message type:', data.type);
+                logger.log('[WebServer] Unknown WebSocket message type:', data.type);
         }
     }
     
@@ -240,7 +243,7 @@ class WebServer {
                     }
                 }
             } catch (error) {
-                console.error('[WebServer] Error getting last BBS activity:', error);
+                logger.error('[WebServer] Error getting last BBS activity:', error);
             }
         }
         
@@ -271,7 +274,7 @@ class WebServer {
                     aprsStationsCount = uniqueStations.size;
                 }
             } catch (error) {
-                console.error('[WebServer] Error getting APRS data:', error);
+                logger.error('[WebServer] Error getting APRS data:', error);
             }
         }
         
@@ -282,7 +285,7 @@ class WebServer {
                 const bulletins = this.bbsServer.getAllActiveBulletins();
                 bulletinCount = bulletins.length;
             } catch (error) {
-                console.error('[WebServer] Error getting bulletin count:', error);
+                logger.error('[WebServer] Error getting bulletin count:', error);
             }
         }
         
@@ -293,7 +296,7 @@ class WebServer {
                 const connectionKeys = this.bbsServer.storage.list('connection-%');
                 bbsTotalConnections = connectionKeys.length;
             } catch (error) {
-                console.error('[WebServer] Error getting BBS connection count:', error);
+                logger.error('[WebServer] Error getting BBS connection count:', error);
             }
         }
         
@@ -395,10 +398,10 @@ class WebServer {
     }
     
     getWinlinkMails() {
-        console.log('[WebServer] getWinlinkMails called');
+        logger.log('[WebServer] getWinlinkMails called');
         
         if (!this.winlinkServer) {
-            console.log('[WebServer] No WinLink server available');
+            logger.log('[WebServer] No WinLink server available');
             return { 
                 inbox: [], outbox: [], draft: [], sent: [], archive: [], trash: [],
                 inboxSize: 0, outboxSize: 0, draftSize: 0, sentSize: 0, archiveSize: 0, trashSize: 0
@@ -406,7 +409,7 @@ class WebServer {
         }
         
         try {
-            console.log('[WebServer] Retrieving WinLink mails');
+            logger.log('[WebServer] Retrieving WinLink mails');
             const allMails = this.winlinkServer.mails || [];
             
             // Organize by mailbox
@@ -478,14 +481,14 @@ class WebServer {
             archive.sort(sortByDate);
             trash.sort(sortByDate);
             
-            console.log(`[WebServer] Retrieved ${inbox.length} inbox (${inboxSize} bytes), ${outbox.length} outbox (${outboxSize} bytes), ${draft.length} draft (${draftSize} bytes), ${sent.length} sent (${sentSize} bytes), ${archive.length} archive (${archiveSize} bytes), ${trash.length} trash (${trashSize} bytes) mails`);
+            logger.log(`[WebServer] Retrieved ${inbox.length} inbox (${inboxSize} bytes), ${outbox.length} outbox (${outboxSize} bytes), ${draft.length} draft (${draftSize} bytes), ${sent.length} sent (${sentSize} bytes), ${archive.length} archive (${archiveSize} bytes), ${trash.length} trash (${trashSize} bytes) mails`);
             
             return { 
                 inbox, outbox, draft, sent, archive, trash,
                 inboxSize, outboxSize, draftSize, sentSize, archiveSize, trashSize
             };
         } catch (error) {
-            console.error('[WebServer] Error retrieving WinLink mails:', error);
+            logger.error('[WebServer] Error retrieving WinLink mails:', error);
             return { 
                 inbox: [], outbox: [], draft: [], sent: [], archive: [], trash: [],
                 inboxSize: 0, outboxSize: 0, draftSize: 0, sentSize: 0, archiveSize: 0, trashSize: 0
@@ -494,22 +497,22 @@ class WebServer {
     }
     
     getBulletinHistory() {
-        console.log('[WebServer] getBulletinHistory called');
+        logger.log('[WebServer] getBulletinHistory called');
         
         if (!this.bbsServer) {
-            console.log('[WebServer] No BBS server available');
+            logger.log('[WebServer] No BBS server available');
             return [];
         }
         
         if (!this.bbsServer.bulletinStorage) {
-            console.log('[WebServer] No bulletin storage available');
+            logger.log('[WebServer] No bulletin storage available');
             return [];
         }
         
         try {
-            console.log('[WebServer] Attempting to get all active bulletins');
+            logger.log('[WebServer] Attempting to get all active bulletins');
             const bulletins = this.bbsServer.getAllActiveBulletins();
-            console.log(`[WebServer] Retrieved ${bulletins.length} active bulletins`);
+            logger.log(`[WebServer] Retrieved ${bulletins.length} active bulletins`);
             
             return bulletins.map(bulletin => ({
                 id: bulletin.id,
@@ -522,28 +525,28 @@ class WebServer {
                 expireDays: bulletin.expireDays
             }));
         } catch (error) {
-            console.error('[WebServer] Error retrieving bulletins:', error);
+            logger.error('[WebServer] Error retrieving bulletins:', error);
             return [];
         }
     }
     
     getBbsConnectionHistory() {
-        console.log('[WebServer] getBbsConnectionHistory called');
+        logger.log('[WebServer] getBbsConnectionHistory called');
         
         if (!this.bbsServer) {
-            console.log('[WebServer] No BBS server available');
+            logger.log('[WebServer] No BBS server available');
             return [];
         }
         
         if (!this.bbsServer.storage) {
-            console.log('[WebServer] No BBS storage available');
+            logger.log('[WebServer] No BBS storage available');
             return [];
         }
         
         try {
-            console.log('[WebServer] Attempting to list connection keys');
+            logger.log('[WebServer] Attempting to list connection keys');
             const connectionKeys = this.bbsServer.storage.list('connection-%');
-            console.log(`[WebServer] Found ${connectionKeys.length} connection keys`);
+            logger.log(`[WebServer] Found ${connectionKeys.length} connection keys`);
             
             connectionKeys.sort().reverse();
             const recentKeys = connectionKeys.slice(0, 20);
@@ -565,31 +568,31 @@ class WebServer {
                 }
             }
             
-            console.log(`[WebServer] Retrieved ${connections.length} BBS connections`);
+            logger.log(`[WebServer] Retrieved ${connections.length} BBS connections`);
             return connections;
         } catch (error) {
-            console.error('[WebServer] Error retrieving BBS connections:', error);
+            logger.error('[WebServer] Error retrieving BBS connections:', error);
             return [];
         }
     }
     
     getAprsMessageHistory() {
-        console.log('[WebServer] getAprsMessageHistory called');
+        logger.log('[WebServer] getAprsMessageHistory called');
         
         if (!this.bbsServer) {
-            console.log('[WebServer] No BBS server available');
+            logger.log('[WebServer] No BBS server available');
             return [];
         }
         
         if (!this.bbsServer.aprsMessageStorage) {
-            console.log('[WebServer] No APRS message storage available');
+            logger.log('[WebServer] No APRS message storage available');
             return [];
         }
         
         try {
-            console.log('[WebServer] Attempting to list APRS message keys');
+            logger.log('[WebServer] Attempting to list APRS message keys');
             const messageKeys = this.bbsServer.aprsMessageStorage.list('aprs-msg-%');
-            console.log(`[WebServer] Found ${messageKeys.length} APRS message keys`);
+            logger.log(`[WebServer] Found ${messageKeys.length} APRS message keys`);
             
             messageKeys.sort().reverse();
             const recentKeys = messageKeys.slice(0, 100); // Increased from 20 to 100 for better map display
@@ -612,10 +615,10 @@ class WebServer {
                 }
             }
             
-            console.log(`[WebServer] Retrieved ${messages.length} APRS messages`);
+            logger.log(`[WebServer] Retrieved ${messages.length} APRS messages`);
             return messages;
         } catch (error) {
-            console.error('[WebServer] Error retrieving APRS messages:', error);
+            logger.error('[WebServer] Error retrieving APRS messages:', error);
             return [];
         }
     }
@@ -672,7 +675,7 @@ class WebServer {
     }
     
     handleBulletinCreation(ws, data) {
-        console.log('[WebServer] Handling bulletin creation request:', data);
+        logger.log('[WebServer] Handling bulletin creation request:', data);
         
         if (!this.bbsServer || !this.bbsServer.bulletinStorage) {
             this.sendResponse(ws, {
@@ -702,7 +705,7 @@ class WebServer {
             const result = this.bbsServer.createBulletin(stationCallsign, message);
             
             if (result.success) {
-                console.log(`[WebServer] Web created bulletin ${result.bulletin.id} by ${stationCallsign}`);
+                logger.log(`[WebServer] Web created bulletin ${result.bulletin.id} by ${stationCallsign}`);
                 
                 this.sendResponse(ws, {
                     type: 'bulletin_create_result',
@@ -720,7 +723,7 @@ class WebServer {
                 });
             }
         } catch (error) {
-            console.error('[WebServer] Error creating bulletin:', error);
+            logger.error('[WebServer] Error creating bulletin:', error);
             this.sendResponse(ws, {
                 type: 'bulletin_create_result',
                 success: false,
@@ -730,7 +733,7 @@ class WebServer {
     }
     
     handleMailDeletion(ws, data) {
-        console.log('[WebServer] Handling mail deletion request:', data);
+        logger.log('[WebServer] Handling mail deletion request:', data);
         
         if (!this.winlinkServer) {
             this.sendResponse(ws, {
@@ -776,7 +779,7 @@ class WebServer {
             if (permanent) {
                 // Permanently delete the mail
                 this.winlinkServer.mails.splice(mailIndex, 1);
-                console.log(`[WebServer] Permanently deleted mail ${mid}`);
+                logger.log(`[WebServer] Permanently deleted mail ${mid}`);
                 
                 // Save to storage if available
                 if (this.winlinkServer.storage) {
@@ -792,7 +795,7 @@ class WebServer {
             } else {
                 // Move to trash (mailbox 5)
                 mail.mailbox = 5;
-                console.log(`[WebServer] Moved mail ${mid} to trash`);
+                logger.log(`[WebServer] Moved mail ${mid} to trash`);
                 
                 // Save to storage if available
                 if (this.winlinkServer.storage) {
@@ -811,7 +814,7 @@ class WebServer {
             this.sendWinlinkMails();
             
         } catch (error) {
-            console.error('[WebServer] Error deleting mail:', error);
+            logger.error('[WebServer] Error deleting mail:', error);
             this.sendResponse(ws, {
                 type: 'mail_delete_result',
                 success: false,
@@ -823,7 +826,7 @@ class WebServer {
     }
     
     handleMailComposition(ws, data) {
-        console.log('[WebServer] Handling mail composition request:', data);
+        logger.log('[WebServer] Handling mail composition request:', data);
         
         if (!this.winlinkServer) {
             this.sendResponse(ws, {
@@ -873,7 +876,7 @@ class WebServer {
             // Add to WinLink server's mail array
             this.winlinkServer.mails.push(newMail);
             
-            console.log(`[WebServer] Created ${isDraft ? 'draft' : 'outbox'} mail ${mid} from ${from} to ${to}`);
+            logger.log(`[WebServer] Created ${isDraft ? 'draft' : 'outbox'} mail ${mid} from ${from} to ${to}`);
             
             // Save to storage if available
             if (this.winlinkServer.storage) {
@@ -891,7 +894,7 @@ class WebServer {
             this.sendWinlinkMails();
             
         } catch (error) {
-            console.error('[WebServer] Error composing mail:', error);
+            logger.error('[WebServer] Error composing mail:', error);
             this.sendResponse(ws, {
                 type: 'mail_compose_result',
                 success: false,
@@ -902,7 +905,7 @@ class WebServer {
     }
     
     handleBulletinDeletion(ws, data) {
-        console.log('[WebServer] Handling bulletin deletion request:', data);
+        logger.log('[WebServer] Handling bulletin deletion request:', data);
         
         if (!this.bbsServer || !this.bbsServer.bulletinStorage) {
             this.sendResponse(ws, {
@@ -941,7 +944,7 @@ class WebServer {
             
             // Admin can delete any bulletin from web interface
             if (this.bbsServer.bulletinStorage.delete(storageKey)) {
-                console.log(`[WebServer] Admin deleted bulletin ${bulletinId} by ${bulletin.callsign}`);
+                logger.log(`[WebServer] Admin deleted bulletin ${bulletinId} by ${bulletin.callsign}`);
                 
                 this.sendResponse(ws, {
                     type: 'bulletin_delete_result',
@@ -959,7 +962,7 @@ class WebServer {
                 });
             }
         } catch (error) {
-            console.error('[WebServer] Error deleting bulletin:', error);
+            logger.error('[WebServer] Error deleting bulletin:', error);
             this.sendResponse(ws, {
                 type: 'bulletin_delete_result',
                 success: false,

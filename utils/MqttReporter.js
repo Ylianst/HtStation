@@ -1,5 +1,8 @@
 const mqtt = require('mqtt');
 
+// Get logger instance
+const logger = global.logger ? global.logger.getLogger('MQTT') : console;
+
 class MqttReporter {
     constructor(config) {
         this.config = config;
@@ -21,10 +24,10 @@ class MqttReporter {
             password: this.config.MQTT_PASSWORD
         });
         this.client.on('connect', () => {
-            console.log('[MQTT] Connected to broker');
+            logger.log('[MQTT] Connected to broker');
         });
         this.client.on('error', (err) => {
-            console.error('[MQTT] Error:', err.message);
+            logger.error('[MQTT] Error:', err.message);
         });
     }
 
@@ -48,7 +51,7 @@ class MqttReporter {
             icon: 'mdi:battery'
         };
         this.publishStatus(batterySensorTopic, batterySensorConfig);
-        console.log('[MQTT] Published Home Assistant Battery sensor discovery config.');
+        logger.log('[MQTT] Published Home Assistant Battery sensor discovery config.');
     }
 
     publishVolumeNumber() {
@@ -68,7 +71,7 @@ class MqttReporter {
             icon: 'mdi:volume-high'
         };
         this.publishStatus(volumeNumberTopic, volumeNumberConfig);
-        console.log('[MQTT] Published Home Assistant Volume number discovery config.');
+        logger.log('[MQTT] Published Home Assistant Volume number discovery config.');
     }
 
     publishSquelchNumber() {
@@ -88,7 +91,7 @@ class MqttReporter {
             icon: 'mdi:volume-off'
         };
         this.publishStatus(squelchNumberTopic, squelchNumberConfig);
-        console.log('[MQTT] Published Home Assistant Squelch number discovery config.');
+        logger.log('[MQTT] Published Home Assistant Squelch number discovery config.');
     }
 
     publishScanSwitch() {
@@ -107,7 +110,7 @@ class MqttReporter {
             icon: 'mdi:radar'
         };
         this.publishStatus(scanSwitchTopic, scanSwitchConfig);
-        console.log('[MQTT] Published Home Assistant Scan switch discovery config.');
+        logger.log('[MQTT] Published Home Assistant Scan switch discovery config.');
     }
 
     publishDualWatchSwitch() {
@@ -126,7 +129,7 @@ class MqttReporter {
             icon: 'mdi:swap-horizontal'
         };
         this.publishStatus(doubleChannelSwitchTopic, doubleChannelSwitchConfig);
-        console.log('[MQTT] Published Home Assistant Dual Watch switch discovery config.');
+        logger.log('[MQTT] Published Home Assistant Dual Watch switch discovery config.');
     }
 
     publishGpsSwitch() {
@@ -145,7 +148,7 @@ class MqttReporter {
             icon: 'mdi:crosshairs-gps'
         };
         this.publishStatus(gpsSwitchTopic, gpsSwitchConfig);
-        console.log('[MQTT] Published Home Assistant GPS switch discovery config.');
+        logger.log('[MQTT] Published Home Assistant GPS switch discovery config.');
         
         // Publish initial GPS state as OFF since GPS starts disabled
         this.publishStatus(gpsStateTopic, { gps: 'OFF' });
@@ -205,7 +208,7 @@ class MqttReporter {
         };
         this.publishStatus(lockSensorTopic, lockSensorConfig);
 
-        console.log('[MQTT] Published Home Assistant GPS sensors discovery config.');
+        logger.log('[MQTT] Published Home Assistant GPS sensors discovery config.');
     }
 
     publishAprsMessageSensor() {
@@ -249,7 +252,7 @@ class MqttReporter {
         };
         this.publishStatus(aprsOtherSensorTopic, aprsOtherSensorConfig);
 
-        console.log('[MQTT] Published Home Assistant APRS message sensors discovery config.');
+        logger.log('[MQTT] Published Home Assistant APRS message sensors discovery config.');
     }
 
     publishFirmwareVersionSensor(versionString) {
@@ -265,7 +268,7 @@ class MqttReporter {
         };
         this.publishStatus(fwSensorTopic, fwSensorConfig);
         this.publishStatus(fwStateTopic, { firmware_version: versionString });
-        console.log('[MQTT] Published Firmware Version sensor:', versionString);
+        logger.log('[MQTT] Published Firmware Version sensor:', versionString);
     }
 
     publishVfoSelects(channels, channelAIndex, channelBIndex) {
@@ -339,7 +342,7 @@ class MqttReporter {
         };
         
         this.publishStatus(regionSelectTopic, regionSelectConfig);
-        console.log(`[MQTT] Published Region select discovery with ${regionCount} regions.`);
+        logger.log(`[MQTT] Published Region select discovery with ${regionCount} regions.`);
         
         // Publish initial state if we know the current region
         if (lastRegion !== null) {
@@ -364,7 +367,7 @@ class MqttReporter {
             timestamp: new Date().toISOString()
         };
         this.publishStatus(gpsPositionTopic, disabledPositionData);
-        console.log(`[MQTT] DEBUG: Published GPS disabled state to ${gpsPositionTopic}`);
+        logger.log(`[MQTT] DEBUG: Published GPS disabled state to ${gpsPositionTopic}`);
     }
 
     publishAllDiscoveryConfigs() {

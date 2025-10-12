@@ -3,9 +3,22 @@
 const path = require('path');
 const crypto = require('crypto');
 const { loadConfig } = require('../utils/configLoader');
-const Radio = require('./Radio.js');
-const MqttReporter = require('../utils/MqttReporter');
-const RadioController = require('./radioctl.js');
+const { initializeLogger, getLogger } = require('../utils/consoleLogger');
+
+// === Check for command line arguments ===
+if (process.argv.includes('--help') || process.argv.includes('-h')) {
+    console.log(`Handi-Talky Station v${require('../package.json').version}`);
+    console.log('https://github.com/Ylianst/HtStation');
+    console.log('');
+    console.log('Usage: node htstation.js [options]');
+    console.log('');
+    console.log('Options:');
+    console.log('  --help, -h       Display this help message');
+    console.log('  --server         Run in background (detached) server mode');
+    console.log('  --showconfig     Display current configuration and exit');
+    console.log('');
+    process.exit(0);
+}
 
 // === Load configuration from config.ini ===
 let config;
@@ -16,30 +29,58 @@ try {
     process.exit(1);
 }
 
-console.log('[App] Loaded settings from config.ini:');
-for (const [key, value] of Object.entries(config)) {
-    if (key === 'AUTH') {
-        // Display AUTH entries without revealing passwords
-        if (Array.isArray(value)) {
-            const maskedAuth = value.map(authEntry => {
-                const commaIndex = authEntry.indexOf(',');
-                if (commaIndex !== -1) {
-                    const callsign = authEntry.substring(0, commaIndex);
-                    return `${callsign},***`;
-                }
-                return authEntry;
-            });
-            console.log(`  ${key} = ${maskedAuth.join(',')}`);
+// === Handle --showconfig argument ===
+if (process.argv.includes('--showconfig')) {
+    console.log('Current Configuration:');
+    console.log('='.repeat(50));
+    
+    // Display all config settings except sensitive info
+    for (const [key, value] of Object.entries(config)) {
+        if (key === 'AUTH') {
+            // Display AUTH entries without revealing passwords
+            if (Array.isArray(value)) {
+                const maskedAuth = value.map(authEntry => {
+                    const commaIndex = authEntry.indexOf(',');
+                    if (commaIndex !== -1) {
+                        const callsign = authEntry.substring(0, commaIndex);
+                        return `${callsign},***`;
+                    }
+                    return authEntry;
+                });
+                console.log(`  ${key} = ${maskedAuth.join(', ')}`);
+            } else {
+                console.log(`  ${key} = ${value}`);
+            }
+        } else if (key === 'MQTT_PASSWORD' || key === 'WINLINK_PASSWORD') {
+            // Mask all password fields
+            console.log(`  ${key} = ***`);
         } else {
             console.log(`  ${key} = ${value}`);
         }
-    } else if (key === 'MQTT_PASSWORD') {
-        // Also mask MQTT password for security
-        console.log(`  ${key} = ***`);
-    } else {
-        console.log(`  ${key} = ${value}`);
     }
+    
+    console.log('='.repeat(50));
+    process.exit(0);
 }
+
+// === Initialize Console Logger ===
+initializeLogger(config);
+const logger = getLogger();
+
+// Make logger available globally for other modules
+global.logger = logger;
+
+// NOW load modules that depend on global.logger
+const Radio = require('./Radio.js');
+const MqttReporter = require('../utils/MqttReporter');
+const RadioController = require('./radioctl.js');
+
+// Display welcome message
+console.log(`Handi-Talky Station v${require('../package.json').version}`);
+console.log('https://github.com/Ylianst/HtStation');
+
+// Get App logger instance
+const appLogger = logger.getLogger('App');
 
 const RADIO_MAC_ADDRESS = config.MACADDRESS;
 const RADIO_CALLSIGN = config.CALLSIGN;
@@ -50,7 +91,7 @@ const ECHO_STATION_ID = config.ECHO_STATION_ID ? parseInt(config.ECHO_STATION_ID
 const WINLINK_STATION_ID = config.WINLINK_STATION_ID ? parseInt(config.WINLINK_STATION_ID, 10) : -1;
 
 if (!RADIO_MAC_ADDRESS || !RADIO_CALLSIGN) {
-    console.error('[App] Missing required settings in config.ini (MACADDRESS, CALLSIGN).');
+    appLogger.error('[App] Missing required settings in config.ini (MACADDRESS, CALLSIGN).');
     process.exit(1);
 }
 
@@ -60,13 +101,13 @@ const isEchoEnabled = ECHO_STATION_ID >= 0 && ECHO_STATION_ID <= 15;
 const isWinlinkEnabled = WINLINK_STATION_ID >= 0 && WINLINK_STATION_ID <= 15;
 
 if (!isBbsEnabled && !isEchoEnabled && !isWinlinkEnabled) {
-    console.error('[App] At least one server must be enabled. Set BBS_STATION_ID, ECHO_STATION_ID, or WINLINK_STATION_ID to a value between 0 and 15.');
+    appLogger.error('[App] At least one server must be enabled. Set BBS_STATION_ID, ECHO_STATION_ID, or WINLINK_STATION_ID to a value between 0 and 15.');
     process.exit(1);
 }
 
-console.log(`[App] BBS Server: ${isBbsEnabled ? `ENABLED on ${RADIO_CALLSIGN}-${BBS_STATION_ID}` : 'DISABLED'}`);
-console.log(`[App] Echo Server: ${isEchoEnabled ? `ENABLED on ${RADIO_CALLSIGN}-${ECHO_STATION_ID}` : 'DISABLED'}`);
-console.log(`[App] WinLink Server: ${isWinlinkEnabled ? `ENABLED on ${RADIO_CALLSIGN}-${WINLINK_STATION_ID}` : 'DISABLED'}`);
+appLogger.log(`[App] BBS Server: ${isBbsEnabled ? `ENABLED on ${RADIO_CALLSIGN}-${BBS_STATION_ID}` : 'DISABLED'}`);
+appLogger.log(`[App] Echo Server: ${isEchoEnabled ? `ENABLED on ${RADIO_CALLSIGN}-${ECHO_STATION_ID}` : 'DISABLED'}`);
+appLogger.log(`[App] WinLink Server: ${isWinlinkEnabled ? `ENABLED on ${RADIO_CALLSIGN}-${WINLINK_STATION_ID}` : 'DISABLED'}`);
 
 // === Background server mode ===
 if (process.argv.includes('--server') && !process.env._HTC_BG) {
@@ -78,12 +119,14 @@ if (process.argv.includes('--server') && !process.env._HTC_BG) {
         env: { ...process.env, _HTC_BG: '1' }
     });
     child.unref();
-    console.log('[App] Started in background (server mode).');
+    console.log('Started in background (server mode).');
     process.exit(0);
+} else {
+    console.log('Starting in console mode, --help for additional options.');
 }
 
 // === Main Application Logic ===
-console.log('Starting the app...');
+appLogger.log('[App] Starting the app...');
 
 // === MQTT Setup ===
 const mqttEnabled = config.MQTT_BROKER_URL && config.MQTT_TOPIC;
@@ -93,7 +136,7 @@ if (mqttEnabled) {
     try {
         mqttReporter.connect();
     } catch (err) {
-        console.error('[App] MQTT setup failed:', err.message);
+        appLogger.error('[App] MQTT setup failed:', err.message);
         mqttReporter = null;
     }
 }
@@ -158,7 +201,7 @@ let echoServer = null;
 if (isEchoEnabled) {
     const echoConfig = { ...config, CALLSIGN: RADIO_CALLSIGN, STATIONID: ECHO_STATION_ID };
     echoServer = new EchoServer(echoConfig, radio, activeSessionRegistry);
-    console.log(`[App] Echo Server initialized on ${RADIO_CALLSIGN}-${ECHO_STATION_ID}`);
+    appLogger.log(`[App] Echo Server initialized on ${RADIO_CALLSIGN}-${ECHO_STATION_ID}`);
 }
 
 // Initialize BBS Server (conditionally)
@@ -166,7 +209,7 @@ let bbsServer = null;
 if (isBbsEnabled) {
     const bbsConfig = { ...config, CALLSIGN: RADIO_CALLSIGN, STATIONID: BBS_STATION_ID };
     bbsServer = new BbsServer(bbsConfig, radio, activeSessionRegistry);
-    console.log(`[App] BBS Server initialized on ${RADIO_CALLSIGN}-${BBS_STATION_ID}`);
+    appLogger.log(`[App] BBS Server initialized on ${RADIO_CALLSIGN}-${BBS_STATION_ID}`);
 }
 
 // Initialize Storage for WinLink
@@ -183,7 +226,7 @@ if (isWinlinkEnabled) {
         version: '1.0'
     };
     winlinkServer = new WinLinkServer(winlinkConfig, storage, activeSessionRegistry);
-    console.log(`[App] WinLink Server initialized on ${RADIO_CALLSIGN}-${WINLINK_STATION_ID}`);
+    appLogger.log(`[App] WinLink Server initialized on ${RADIO_CALLSIGN}-${WINLINK_STATION_ID}`);
 }
 
 // Initialize Web Server (if enabled)
@@ -195,53 +238,53 @@ if (config.WEBSERVERPORT) {
             webServer = new WebServer(config, radio, bbsServer, aprsHandler, winlinkServer);
             webServer.start(webServerPort)
                 .then(() => {
-                    console.log(`[App] Web server started successfully on port ${webServerPort}`);
+                    appLogger.log(`[App] Web server started successfully on port ${webServerPort}`);
                 })
                 .catch((error) => {
                     // Check if the error is due to port already being in use
                     if (error.code === 'EADDRINUSE') {
-                        console.error(`[App] ❌ Web server failed to start: Port ${webServerPort} is already in use.`);
-                        console.error(`[App] 💡 To fix this issue:`);
-                        console.error(`[App]    • Stop the application or service using port ${webServerPort}`);
-                        console.error(`[App]    • Or change WEBSERVERPORT in config.ini to a different port number`);
-                        console.error(`[App]    • Available ports are typically: 3000, 8080, 8090, 9000, etc.`);
+                        appLogger.error(`[App] ❌ Web server failed to start: Port ${webServerPort} is already in use.`);
+                        appLogger.error(`[App] 💡 To fix this issue:`);
+                        appLogger.error(`[App]    • Stop the application or service using port ${webServerPort}`);
+                        appLogger.error(`[App]    • Or change WEBSERVERPORT in config.ini to a different port number`);
+                        appLogger.error(`[App]    • Available ports are typically: 3000, 8080, 8090, 9000, etc.`);
                     } else if (error.code === 'EACCES') {
-                        console.error(`[App] ❌ Web server failed to start: Permission denied for port ${webServerPort}.`);
-                        console.error(`[App] 💡 To fix this issue:`);
-                        console.error(`[App]    • Use a port number above 1024 (non-privileged ports)`);
-                        console.error(`[App]    • Or run the application with administrator/root privileges`);
+                        appLogger.error(`[App] ❌ Web server failed to start: Permission denied for port ${webServerPort}.`);
+                        appLogger.error(`[App] 💡 To fix this issue:`);
+                        appLogger.error(`[App]    • Use a port number above 1024 (non-privileged ports)`);
+                        appLogger.error(`[App]    • Or run the application with administrator/root privileges`);
                     } else {
-                        console.error(`[App] ❌ Web server failed to start: ${error.message}`);
-                        console.error(`[App] 💡 Error details: ${error.code || 'Unknown error code'}`);
+                        appLogger.error(`[App] ❌ Web server failed to start: ${error.message}`);
+                        appLogger.error(`[App] 💡 Error details: ${error.code || 'Unknown error code'}`);
                     }
-                    console.error(`[App] ⚠️  The application will continue running without the web interface.`);
+                    appLogger.error(`[App] ⚠️  The application will continue running without the web interface.`);
                     webServer = null;
                     
                     // Exit gracefully with a user-friendly message
                     setTimeout(() => {
-                        console.error(`[App] 🛑 Exiting application due to web server startup failure.`);
+                        appLogger.error(`[App] 🛑 Exiting application due to web server startup failure.`);
                         process.exit(1);
                     }, 1000);
                 });
         } catch (error) {
-            console.error(`[App] ❌ Web server initialization failed: ${error.message}`);
-            console.error(`[App] 🛑 Exiting application due to web server initialization failure.`);
+            appLogger.error(`[App] ❌ Web server initialization failed: ${error.message}`);
+            appLogger.error(`[App] 🛑 Exiting application due to web server initialization failure.`);
             webServer = null;
             process.exit(1);
         }
     } else {
-        console.log('[App] Web server disabled (WEBSERVERPORT is 0)');
+        appLogger.log('[App] Web server disabled (WEBSERVERPORT is 0)');
     }
 } else {
-    console.log('[App] Web server disabled (WEBSERVERPORT not configured)');
+    appLogger.log('[App] Web server disabled (WEBSERVERPORT not configured)');
 }
 
 radio.on('data', (frame) => {
     // Attempt to decode AX.25 packet
     const packet = AX25Packet.decodeAX25Packet(frame);
     if (packet) {
-        console.log('[App] Decoded AX.25 packet:', packet.toString());
-        console.log('[App] Formatted packet:', packet.formatAX25PacketString());
+        appLogger.log('[App] Decoded AX.25 packet:', packet.toString());
+        appLogger.log('[App] Formatted packet:', packet.formatAX25PacketString());
         
         // Check if this packet is from the APRS channel
         if (packet.channel_name === 'APRS') {
@@ -258,40 +301,40 @@ radio.on('data', (frame) => {
             
             // Try BBS server if enabled and packet is addressed to BBS SSID
             if (bbsServer && firstAddr.address === RADIO_CALLSIGN && firstAddr.SSID == BBS_STATION_ID) {
-                console.log(`[App] Routing packet to BBS Server (${RADIO_CALLSIGN}-${BBS_STATION_ID})`);
+                appLogger.log(`[App] Routing packet to BBS Server (${RADIO_CALLSIGN}-${BBS_STATION_ID})`);
                 bbsServer.processPacket(packet);
                 processed = true;
             }
             
             // Try Echo server if enabled and packet is addressed to Echo SSID (and not already processed)
             if (!processed && echoServer && firstAddr.address === RADIO_CALLSIGN && firstAddr.SSID == ECHO_STATION_ID) {
-                console.log(`[App] Routing packet to Echo Server (${RADIO_CALLSIGN}-${ECHO_STATION_ID})`);
+                appLogger.log(`[App] Routing packet to Echo Server (${RADIO_CALLSIGN}-${ECHO_STATION_ID})`);
                 echoServer.processPacket(packet);
                 processed = true;
             }
             
             // Try WinLink server if enabled and packet is addressed to WinLink SSID (and not already processed)
             if (!processed && winlinkServer && firstAddr.address === RADIO_CALLSIGN && firstAddr.SSID == WINLINK_STATION_ID) {
-                console.log(`[App] Routing packet to WinLink Server (${RADIO_CALLSIGN}-${WINLINK_STATION_ID})`);
+                appLogger.log(`[App] Routing packet to WinLink Server (${RADIO_CALLSIGN}-${WINLINK_STATION_ID})`);
                 winlinkServer.processPacket(packet, radio);
                 processed = true;
             }
             
             if (!processed) {
-                console.log(`[App] Packet not addressed to any enabled server (dest: ${firstAddr.address}-${firstAddr.SSID})`);
+                appLogger.log(`[App] Packet not addressed to any enabled server (dest: ${firstAddr.address}-${firstAddr.SSID})`);
             }
         }
     } else {
-        console.log(`[App] Received TNC data frame on channel ${frame.channel_id}${frame.channel_name ? ` (${frame.channel_name})` : ''}:`, frame.data);
+        appLogger.log(`[App] Received TNC data frame on channel ${frame.channel_id}${frame.channel_name ? ` (${frame.channel_name})` : ''}:`, frame.data);
     }
 });
 
 radio.on('rawCommand', (data) => {
-    //console.log('[App] Received raw command data.');
+    //appLogger.log('[App] Received raw command data.');
 });
 
 radio.on('disconnected', () => {
-    console.log('[App] Disconnected from radio.');
+    appLogger.log('[App] Disconnected from radio.');
 });
 
 // Attempt to connect to the radio

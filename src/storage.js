@@ -1,5 +1,8 @@
 'use strict';
 
+// Get logger instance
+const logger = global.logger ? global.logger.getLogger('Storage') : console;
+
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
@@ -69,9 +72,9 @@ class Storage {
             };
             
             this.isInitialized = true;
-            console.log(`[Storage] Initialized database at ${this.dbPath}`);
+            logger.log(`[Storage] Initialized database at ${this.dbPath}`);
         } catch (error) {
-            console.error('[Storage] Failed to initialize database:', error);
+            logger.error('[Storage] Failed to initialize database:', error);
             throw error;
         }
     }
@@ -92,7 +95,7 @@ class Storage {
             this.statements.save.run(key, serialized);
             return true;
         } catch (error) {
-            console.error(`[Storage] Failed to save key '${key}':`, error);
+            logger.error(`[Storage] Failed to save key '${key}':`, error);
             return false;
         }
     }
@@ -113,7 +116,7 @@ class Storage {
             
             return JSON.parse(row.value);
         } catch (error) {
-            console.error(`[Storage] Failed to load key '${key}':`, error);
+            logger.error(`[Storage] Failed to load key '${key}':`, error);
             return null;
         }
     }
@@ -132,7 +135,7 @@ class Storage {
             const result = this.statements.delete.run(key);
             return result.changes > 0;
         } catch (error) {
-            console.error(`[Storage] Failed to delete key '${key}':`, error);
+            logger.error(`[Storage] Failed to delete key '${key}':`, error);
             return false;
         }
     }
@@ -151,7 +154,7 @@ class Storage {
             const row = this.statements.exists.get(key);
             return row !== undefined;
         } catch (error) {
-            console.error(`[Storage] Failed to check existence of key '${key}':`, error);
+            logger.error(`[Storage] Failed to check existence of key '${key}':`, error);
             return false;
         }
     }
@@ -177,7 +180,7 @@ class Storage {
             transaction(keyValuePairs);
             return true;
         } catch (error) {
-            console.error('[Storage] Failed to save multiple keys:', error);
+            logger.error('[Storage] Failed to save multiple keys:', error);
             return false;
         }
     }
@@ -203,7 +206,7 @@ class Storage {
             }
             return result;
         } catch (error) {
-            console.error('[Storage] Failed to load multiple keys:', error);
+            logger.error('[Storage] Failed to load multiple keys:', error);
             return {};
         }
     }
@@ -222,7 +225,7 @@ class Storage {
             const rows = this.statements.list.all(pattern);
             return rows.map(row => row.key);
         } catch (error) {
-            console.error(`[Storage] Failed to list keys with pattern '${pattern}':`, error);
+            logger.error(`[Storage] Failed to list keys with pattern '${pattern}':`, error);
             return [];
         }
     }
@@ -240,7 +243,7 @@ class Storage {
             const rows = this.statements.listAll.all();
             return rows.map(row => row.key);
         } catch (error) {
-            console.error('[Storage] Failed to list all keys:', error);
+            logger.error('[Storage] Failed to list all keys:', error);
             return [];
         }
     }
@@ -258,7 +261,7 @@ class Storage {
             const row = this.statements.count.get();
             return row.count;
         } catch (error) {
-            console.error('[Storage] Failed to get count:', error);
+            logger.error('[Storage] Failed to get count:', error);
             return 0;
         }
     }
@@ -276,7 +279,7 @@ class Storage {
             this.statements.clear.run();
             return true;
         } catch (error) {
-            console.error('[Storage] Failed to clear storage:', error);
+            logger.error('[Storage] Failed to clear storage:', error);
             return false;
         }
     }
@@ -301,10 +304,10 @@ class Storage {
             // Simple file copy backup for compatibility
             fs.copyFileSync(this.dbPath, backupPath);
             
-            console.log(`[Storage] Backup created at ${backupPath}`);
+            logger.log(`[Storage] Backup created at ${backupPath}`);
             return true;
         } catch (error) {
-            console.error(`[Storage] Failed to create backup at '${backupPath}':`, error);
+            logger.error(`[Storage] Failed to create backup at '${backupPath}':`, error);
             return false;
         }
     }
@@ -321,10 +324,10 @@ class Storage {
         
         try {
             this.db.exec('VACUUM');
-            console.log('[Storage] Database optimized (VACUUM completed)');
+            logger.log('[Storage] Database optimized (VACUUM completed)');
             return true;
         } catch (error) {
-            console.error('[Storage] Failed to vacuum database:', error);
+            logger.error('[Storage] Failed to vacuum database:', error);
             return false;
         }
     }
@@ -364,7 +367,7 @@ class Storage {
             
             return stats;
         } catch (error) {
-            console.error('[Storage] Failed to get statistics:', error);
+            logger.error('[Storage] Failed to get statistics:', error);
             return { error: error.message };
         }
     }
@@ -381,9 +384,9 @@ class Storage {
                 
                 this.db.close();
                 this.isInitialized = false;
-                console.log('[Storage] Database connection closed');
+                logger.log('[Storage] Database connection closed');
             } catch (error) {
-                console.error('[Storage] Error closing database:', error);
+                logger.error('[Storage] Error closing database:', error);
             }
         }
     }

@@ -1,4 +1,7 @@
 // This module provides a reusable class for managing a Bluetooth connection
+
+// Get logger instance
+const logger = global.logger ? global.logger.getLogger('Radio') : console;
 // to a GAIA-compatible device using the 'bluetooth-serial-port' library.
 
 let bluetooth;
@@ -6,8 +9,8 @@ try {
     bluetooth = require('bluetooth-serial-port');
 } catch (err) {
     if (err.code === 'MODULE_NOT_FOUND') {
-        console.error('[GaiaClient] Required module "bluetooth-serial-port" is missing.');
-        console.error('[GaiaClient] Please run: npm install bluetooth-serial-port');
+        logger.error('[Radio] Required module "bluetooth-serial-port" is missing.');
+        logger.error('[Radio] Please run: npm install bluetooth-serial-port');
         process.exit(1);
     } else {
         throw err;
@@ -65,17 +68,17 @@ class GaiaClient {
      */
     connect() {
         return new Promise((resolve, reject) => {
-            console.log(`Attempting to find a serial port channel on: ${this.macAddress}`);
+            logger.log(`Attempting to find a serial port channel on: ${this.macAddress}`);
             this.btSerial.findSerialPortChannel(this.macAddress, (channel) => {
                 if (channel === -1) {
                     return reject(new Error('Could not find a serial port service on the device.'));
                 }
 
-                console.log(`Found serial port channel: ${channel}`);
-                console.log('Attempting to connect...');
+                logger.log(`Found serial port channel: ${channel}`);
+                logger.log('[Radio] Attempting to connect...');
 
                 this.btSerial.connect(this.macAddress, channel, () => {
-                    console.log('Successfully connected to the radio.');
+                    logger.log('[Radio] Successfully connected to the radio.');
                     this._setupListeners();
                     this.onConnectionStatusChanged(true);
                     resolve();
@@ -101,7 +104,7 @@ class GaiaClient {
             this.commandInterval = null;
         }
         this.onConnectionStatusChanged(false);
-        console.log('Disconnected from the radio.');
+        logger.log('[Radio] Disconnected from the radio.');
     }
 
     /**
@@ -113,13 +116,13 @@ class GaiaClient {
         if (this.btSerial.isOpen()) {
             this.btSerial.write(gaiaFrame, (err, bytesWritten) => {
                 if (err) {
-                    console.error('Failed to write to port:', err);
+                    logger.error('[Radio] Failed to write to port:', err);
                 } else {
                     //console.log(`Command sent: ${gaiaFrame.toString('hex')}`);
                 }
             });
         } else {
-            console.error('Cannot send frame: not connected.');
+            logger.error('[Radio] Cannot send frame: not connected.');
         }
     }
 
@@ -149,7 +152,7 @@ class GaiaClient {
         });
 
         this.btSerial.on('error', (err) => {
-            console.error('An error occurred:', err);
+            logger.error('[Radio] An error occurred:', err);
             this.disconnect();
         });
     }

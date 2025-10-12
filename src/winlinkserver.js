@@ -1,4 +1,7 @@
 /*
+
+// Get logger instance
+const logger = global.logger ? global.logger.getLogger('WinLink') : console;
 Copyright 2025 Ylian Saint-Hilaire
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -44,9 +47,9 @@ class WinLinkServer {
         // Load mails from storage
         this.loadMails();
         
-        console.log(`[WinLink] Server initialized on ${this.callsign}-${this.stationId}`);
+        logger.log(`[WinLink] Server initialized on ${this.callsign}-${this.stationId}`);
         if (this.password) {
-            console.log('[WinLink] Password authentication enabled');
+            logger.log('[WinLink] Password authentication enabled');
         }
     }
 
@@ -72,12 +75,12 @@ class WinLinkServer {
         if (!session) {
             // Check if this station is busy with another server
             if (this.sessionRegistry && !this.sessionRegistry.canCreateSession(sessionKey, 'winlink')) {
-                console.log(`[WinLink] ${sessionKey} is busy with another server`);
+                logger.log(`[WinLink] ${sessionKey} is busy with another server`);
                 this.sendBusyResponse(packet);
                 return null;
             }
             
-            console.log(`[WinLink] Creating new session for ${sessionKey}`);
+            logger.log(`[WinLink] Creating new session for ${sessionKey}`);
             session = new AX25Session({
                 callsign: this.callsign,
                 RADIO_CALLSIGN: this.callsign,
@@ -91,23 +94,23 @@ class WinLinkServer {
             
             // Set up session event handlers
             session.on('stateChanged', (state) => {
-                console.log(`[WinLink] ${sessionKey} state changed to ${state}`);
+                logger.log(`[WinLink] ${sessionKey} state changed to ${state}`);
                 if (state === AX25Session.ConnectionState.CONNECTED) {
                     this.onConnect(session);
                 } else if (state === AX25Session.ConnectionState.DISCONNECTED) {
-                    console.log(`[WinLink] Removing disconnected session for ${sessionKey}`);
+                    logger.log(`[WinLink] Removing disconnected session for ${sessionKey}`);
                     this.onDisconnect(session);
                     this.activeSessions.delete(sessionKey);
                 }
             });
             
             session.on('dataReceived', (data) => {
-                console.log(`[WinLink] ${sessionKey} received ${data.length} bytes`);
+                logger.log(`[WinLink] ${sessionKey} received ${data.length} bytes`);
                 this.onData(session, data);
             });
             
             session.on('error', (error) => {
-                console.log(`[WinLink] ${sessionKey} error: ${error}`);
+                logger.log(`[WinLink] ${sessionKey} error: ${error}`);
             });
             
             this.activeSessions.set(sessionKey, session);
@@ -142,7 +145,7 @@ class WinLinkServer {
                 channel_id: packet.channel_id,
                 data: serialized
             });
-            console.log('[WinLink] Sent DM (busy) response');
+            logger.log('[WinLink] Sent DM (busy) response');
         }
     }
 
@@ -154,12 +157,12 @@ class WinLinkServer {
             const stored = this.storage.load('winlink-mails');
             if (stored && Array.isArray(stored)) {
                 this.mails = stored.map(m => this.deserializeMail(m));
-                console.log(`[WinLink] Loaded ${this.mails.length} mails from storage`);
+                logger.log(`[WinLink] Loaded ${this.mails.length} mails from storage`);
             } else {
                 this.mails = [];
             }
         } catch (error) {
-            console.error('[WinLink] Error loading mails:', error);
+            logger.error('[WinLink] Error loading mails:', error);
             this.mails = [];
         }
     }
@@ -172,7 +175,7 @@ class WinLinkServer {
             const serialized = this.mails.map(m => this.serializeMail(m));
             this.storage.save('winlink-mails', serialized);
         } catch (error) {
-            console.error('[WinLink] Error saving mails:', error);
+            logger.error('[WinLink] Error saving mails:', error);
         }
     }
 
@@ -218,7 +221,7 @@ class WinLinkServer {
     addMail(mail) {
         this.mails.push(mail);
         this.saveMails();
-        console.log(`[WinLink] Added mail ${mail.mid} from ${mail.from} to ${mail.to}`);
+        logger.log(`[WinLink] Added mail ${mail.mid} from ${mail.from} to ${mail.to}`);
     }
 
     /**
@@ -263,7 +266,7 @@ class WinLinkServer {
     onConnect(session) {
         const remoteCallsign = session.remoteCallsign;
         
-        console.log(`[WinLink] ${remoteCallsign} connected`);
+        logger.log(`[WinLink] ${remoteCallsign} connected`);
 
         // Register this session
         this.sessionRegistry.registerSession(remoteCallsign, session, 'winlink');
@@ -307,7 +310,7 @@ class WinLinkServer {
      */
     onDisconnect(session) {
         const remoteCallsign = session.remoteCallsign;
-        console.log(`[WinLink] ${remoteCallsign} disconnected`);
+        logger.log(`[WinLink] ${remoteCallsign} disconnected`);
         
         // Unregister session
         this.sessionRegistry.unregisterSession(remoteCallsign);
@@ -323,7 +326,7 @@ class WinLinkServer {
      */
     onData(session, data) {
         if (!session.winlinkState) {
-            console.error('[WinLink] Session state not initialized');
+            logger.error('[WinLink] Session state not initialized');
             return;
         }
 
@@ -360,7 +363,7 @@ class WinLinkServer {
             value = line.substring(spaceIdx + 1);
         }
 
-        console.log(`[WinLink] ${session.remoteCallsign} > ${cmd}${value ? ' ' + value : ''}`);
+        logger.log(`[WinLink] ${session.remoteCallsign} > ${cmd}${value ? ' ' + value : ''}`);
 
         // Handle commands
         switch (cmd) {
@@ -389,7 +392,7 @@ class WinLinkServer {
                 break;
                 
             default:
-                console.log(`[WinLink] Unknown command: ${cmd}`);
+                logger.log(`[WinLink] Unknown command: ${cmd}`);
                 break;
         }
     }
@@ -401,7 +404,7 @@ class WinLinkServer {
         const state = session.winlinkState;
         
         if (!this.password) {
-            console.log('[WinLink] Password auth not required');
+            logger.log('[WinLink] Password auth not required');
             return;
         }
 
@@ -409,9 +412,9 @@ class WinLinkServer {
         
         if (response === expected) {
             state.authenticated = true;
-            console.log(`[WinLink] ${session.remoteCallsign} authenticated successfully`);
+            logger.log(`[WinLink] ${session.remoteCallsign} authenticated successfully`);
         } else {
-            console.log(`[WinLink] ${session.remoteCallsign} authentication failed`);
+            logger.log(`[WinLink] ${session.remoteCallsign} authentication failed`);
             session.disconnect();
         }
     }
@@ -434,7 +437,7 @@ class WinLinkServer {
         const state = session.winlinkState;
         
         if (state.proposals.length === 0) {
-            console.log('[WinLink] No proposals to process');
+            logger.log('[WinLink] No proposals to process');
             return;
         }
 
@@ -452,7 +455,7 @@ class WinLinkServer {
         // Validate checksum
         const expectedChecksum = checksum.toString(16).toUpperCase().padStart(2, '0');
         if (checksumStr !== expectedChecksum) {
-            console.log(`[WinLink] Checksum mismatch: expected ${expectedChecksum}, got ${checksumStr}`);
+            logger.log(`[WinLink] Checksum mismatch: expected ${expectedChecksum}, got ${checksumStr}`);
             session.disconnect();
             return;
         }
@@ -471,15 +474,15 @@ class WinLinkServer {
                 // Check if we already have this mail
                 if (this.hasMail(mid)) {
                     response += 'N'; // No, already have it
-                    console.log(`[WinLink] Rejecting duplicate mail ${mid}`);
+                    logger.log(`[WinLink] Rejecting duplicate mail ${mid}`);
                 } else {
                     response += 'Y'; // Yes, accept it
                     acceptedProposals.push(proposal);
-                    console.log(`[WinLink] Accepting mail ${mid}`);
+                    logger.log(`[WinLink] Accepting mail ${mid}`);
                 }
             } else {
                 response += 'H'; // Hold/defer
-                console.log(`[WinLink] Invalid proposal format: ${proposal}`);
+                logger.log(`[WinLink] Invalid proposal format: ${proposal}`);
             }
         }
 
@@ -507,7 +510,7 @@ class WinLinkServer {
         // Append to buffer
         state.binaryBuffer = Buffer.concat([state.binaryBuffer, data]);
         
-        console.log(`[WinLink] Received binary data, buffer size: ${state.binaryBuffer.length}`);
+        logger.log(`[WinLink] Received binary data, buffer size: ${state.binaryBuffer.length}`);
 
         // Try to extract complete mails
         while (this.extractMail(session)) {
@@ -537,7 +540,7 @@ class WinLinkServer {
         const result = WinLinkMail.decodeBlocksToEmail(state.binaryBuffer);
         
         if (result.fail) {
-            console.error('[WinLink] Failed to decode mail');
+            logger.error('[WinLink] Failed to decode mail');
             session.disconnect();
             return false;
         }
@@ -549,7 +552,7 @@ class WinLinkServer {
 
         // Successfully decoded a mail
         const mail = result.mail;
-        console.log(`[WinLink] Decoded mail ${mail.mid} from ${mail.from}`);
+        logger.log(`[WinLink] Decoded mail ${mail.mid} from ${mail.from}`);
 
         // Remove consumed data from buffer
         if (result.dataConsumed > 0) {
@@ -593,7 +596,7 @@ class WinLinkServer {
         
         if (outgoingMails.length === 0) {
             // No mail to send
-            console.log('[WinLink] No outgoing mail');
+            logger.log('[WinLink] No outgoing mail');
             if (lastExchange) {
                 this.sendText(session, 'FQ');
             } else {
@@ -631,7 +634,7 @@ class WinLinkServer {
             proposalText += `F> ${checksum.toString(16).toUpperCase().padStart(2, '0')}`;
             this.sendText(session, proposalText);
             state.mode = 'awaiting_responses';
-            console.log(`[WinLink] Sent ${state.outgoingMails.length} mail proposals`);
+            logger.log(`[WinLink] Sent ${state.outgoingMails.length} mail proposals`);
         } else {
             if (lastExchange) {
                 this.sendText(session, 'FQ');
@@ -648,7 +651,7 @@ class WinLinkServer {
         const state = session.winlinkState;
         
         if (!state.outgoingMails || state.outgoingMails.length === 0) {
-            console.log('[WinLink] Unexpected proposal responses');
+            logger.log('[WinLink] Unexpected proposal responses');
             this.sendText(session, 'FQ');
             return;
         }
@@ -657,7 +660,7 @@ class WinLinkServer {
         const parsedResponses = this.parseProposalResponses(responses);
         
         if (parsedResponses.length !== state.outgoingMails.length) {
-            console.log('[WinLink] Response count mismatch');
+            logger.log('[WinLink] Response count mismatch');
             this.sendText(session, 'FQ');
             return;
         }
@@ -679,7 +682,7 @@ class WinLinkServer {
                 
                 sentCount++;
                 sentMids.push(mail.mid);
-                console.log(`[WinLink] Sent mail ${mail.mid}, ${totalBytes} bytes`);
+                logger.log(`[WinLink] Sent mail ${mail.mid}, ${totalBytes} bytes`);
             }
         }
 
@@ -693,7 +696,7 @@ class WinLinkServer {
         state.outgoingMails = [];
         state.outgoingBlocks = [];
         
-        console.log(`[WinLink] Transfer complete, sent ${sentCount} mails, ${totalBytes} bytes`);
+        logger.log(`[WinLink] Transfer complete, sent ${sentCount} mails, ${totalBytes} bytes`);
     }
 
     /**
@@ -738,7 +741,7 @@ class WinLinkServer {
      * Handle quit command (FQ)
      */
     handleQuit(session) {
-        console.log(`[WinLink] ${session.remoteCallsign} requested disconnect`);
+        logger.log(`[WinLink] ${session.remoteCallsign} requested disconnect`);
         session.disconnect();
     }
 
@@ -751,7 +754,7 @@ class WinLinkServer {
         const lines = text.replace(/\r\n/g, '\r').replace(/\n/g, '\r').split('\r');
         for (const line of lines) {
             if (line.trim().length === 0) continue;
-            console.log(`[WinLink] ${session.remoteCallsign} < ${line}`);
+            logger.log(`[WinLink] ${session.remoteCallsign} < ${line}`);
         }
         
         session.send(Buffer.from(text, 'utf8'));
@@ -763,7 +766,7 @@ class WinLinkServer {
      */
     processPacket(packet, radio) {
         if (!packet || !packet.addresses || packet.addresses.length < 2) {
-            console.log('[WinLink] Invalid packet structure');
+            logger.log('[WinLink] Invalid packet structure');
             return;
         }
 
@@ -777,15 +780,15 @@ class WinLinkServer {
         if (firstAddr.address === this.callsign && firstAddr.SSID == this.stationId) {
             // Check if this is a session-related packet
             if (packet.isSessionPacket()) {
-                console.log('[WinLink] Processing session packet');
+                logger.log('[WinLink] Processing session packet');
                 const session = this.getOrCreateSession(packet);
                 if (session) {
                     session.receive(packet);
                 } else {
-                    console.log('[WinLink] Failed to create/get session for packet');
+                    logger.log('[WinLink] Failed to create/get session for packet');
                 }
             } else {
-                console.log('[WinLink] Received non-session packet, ignoring');
+                logger.log('[WinLink] Received non-session packet, ignoring');
             }
         }
     }

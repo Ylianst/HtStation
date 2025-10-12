@@ -1,5 +1,8 @@
 'use strict';
 
+// Get logger instance
+const logger = global.logger ? global.logger.getLogger('Echo') : console;
+
 const AX25Session = require('./AX25Session');
 const AX25Packet = require('./AX25Packet');
 
@@ -46,7 +49,7 @@ class EchoServer {
                 channel_id: packet.channel_id,
                 data: serialized
             });
-            console.log('[Echo Server] Sent DM (busy) response');
+            logger.log('[Echo Server] Sent DM (busy) response');
         }
     }
     
@@ -61,12 +64,12 @@ class EchoServer {
         if (!session) {
             // Check if this station is busy with another server
             if (this.sessionRegistry && !this.sessionRegistry.canCreateSession(sessionKey, 'echo')) {
-                console.log(`[Echo Session] ${sessionKey} is busy with another server, sending DM`);
+                logger.log(`[Echo Session] ${sessionKey} is busy with another server, sending DM`);
                 this.sendBusyResponse(packet);
                 return null;
             }
             
-            console.log(`[Echo Session] Creating new session for ${sessionKey}`);
+            logger.log(`[Echo Session] Creating new session for ${sessionKey}`);
             session = new AX25Session({
                 callsign: this.RADIO_CALLSIGN, 
                 RADIO_CALLSIGN: this.RADIO_CALLSIGN,
@@ -77,14 +80,14 @@ class EchoServer {
             
             // Set up session event handlers
             session.on('stateChanged', (state) => {
-                console.log(`[Echo Session] ${sessionKey} state changed to ${state}`);
+                logger.log(`[Echo Session] ${sessionKey} state changed to ${state}`);
                 if (state === AX25Session.ConnectionState.CONNECTED) {
                     // Register session in global registry
                     if (this.sessionRegistry) {
                         this.sessionRegistry.registerSession(sessionKey, 'echo');
                     }
                 } else if (state === AX25Session.ConnectionState.DISCONNECTED) {
-                    console.log(`[Echo Session] Removing disconnected session for ${sessionKey}`);
+                    logger.log(`[Echo Session] Removing disconnected session for ${sessionKey}`);
                     
                     // Unregister session from global registry
                     if (this.sessionRegistry) {
@@ -96,21 +99,21 @@ class EchoServer {
             });
             
             session.on('dataReceived', (data) => {
-                console.log(`[Echo Session] ${sessionKey} received ${data.length} bytes: ${data.toString()}`);
+                logger.log(`[Echo Session] ${sessionKey} received ${data.length} bytes: ${data.toString()}`);
                 // Echo the data back to the sender
                 if (session.currentState === AX25Session.ConnectionState.CONNECTED) {
-                    console.log(`[Echo Session] Echoing ${data.length} bytes back to ${sessionKey}`);
+                    logger.log(`[Echo Session] Echoing ${data.length} bytes back to ${sessionKey}`);
                     session.send(data);
                 }
             });
             
             session.on('uiDataReceived', (data) => {
-                console.log(`[Echo Session] ${sessionKey} received UI data ${data.length} bytes: ${data.toString()}`);
+                logger.log(`[Echo Session] ${sessionKey} received UI data ${data.length} bytes: ${data.toString()}`);
                 // For UI frames, we don't echo back as they're connectionless
             });
             
             session.on('error', (error) => {
-                console.log(`[Echo Session] ${sessionKey} error: ${error}`);
+                logger.log(`[Echo Session] ${sessionKey} error: ${error}`);
             });
             
             this.activeSessions.set(sessionKey, session);
@@ -129,12 +132,12 @@ class EchoServer {
             // Check if this is a session-related packet (SABM, SABME, I-frame, etc.)
             if (packet.isSessionPacket()) {
                 // Handle session management
-                console.log('[Echo Session] Processing session packet');
+                logger.log('[Echo Session] Processing session packet');
                 const session = this.getOrCreateEchoSession(packet);
                 if (session) {
                     session.receive(packet);
                 } else {
-                    console.log('[Echo Session] Failed to create/get session for packet');
+                    logger.log('[Echo Session] Failed to create/get session for packet');
                 }
             } else {
                 // Handle U-frame echoing for non-session packets
@@ -154,22 +157,22 @@ class EchoServer {
                         // Serialize replyPacket with header and addresses
                         const serialized = replyPacket.ToByteArray ? replyPacket.ToByteArray() : (replyPacket.toByteArray ? replyPacket.toByteArray() : null);
                         if (!serialized) {
-                            console.warn('[Echo Server] AX.25 packet serialization failed:', replyPacket);
+                            logger.warn('[Echo Server] AX.25 packet serialization failed:', replyPacket);
                         } else if (typeof this.radio.sendTncFrame !== 'function') {
-                            console.warn('[Echo Server] radio.sendTncFrame not implemented.');
+                            logger.warn('[Echo Server] radio.sendTncFrame not implemented.');
                         } else {
                             this.radio.sendTncFrame({
                                 channel_id: replyPacket.channel_id,
                                 data: serialized
                             });
-                            console.log('[Echo Server] Echoed AX.25 U-frame packet back to sender.');
+                            logger.log('[Echo Server] Echoed AX.25 U-frame packet back to sender.');
                         }
                     }
                 } else {
                     if (!isUFrame) {
-                        console.log('[Echo Server] AX.25 packet addressed to our station - not echoing (not a U-frame)');
+                        logger.log('[Echo Server] AX.25 packet addressed to our station - not echoing (not a U-frame)');
                     } else {
-                        console.log('[Echo Server] AX.25 packet addressed to our station - not echoing (no payload data)');
+                        logger.log('[Echo Server] AX.25 packet addressed to our station - not echoing (no payload data)');
                     }
                 }
             }
