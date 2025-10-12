@@ -592,7 +592,7 @@ class WebServer {
             console.log(`[WebServer] Found ${messageKeys.length} APRS message keys`);
             
             messageKeys.sort().reverse();
-            const recentKeys = messageKeys.slice(0, 20);
+            const recentKeys = messageKeys.slice(0, 100); // Increased from 20 to 100 for better map display
             
             const messages = [];
             for (const key of recentKeys) {
@@ -602,8 +602,12 @@ class WebServer {
                         source: record.source,
                         destination: record.destination,
                         message: record.message,
+                        dataType: record.dataType || 'Message',
+                        direction: record.direction || 'received',
                         timestamp: record.timestamp,
-                        localTime: record.localTime
+                        localTime: record.localTime,
+                        position: record.position || null,
+                        weather: record.weather || null
                     });
                 }
             }

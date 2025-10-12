@@ -1915,3 +1915,399 @@ window.addEventListener('beforeunload', function() {
         ws.close();
     }
 });
+
+// ============================================================================
+// APRS MESSAGE FILTERING AND MAP FUNCTIONALITY
+// ============================================================================
+
+// Global APRS state
+let allAprsMessages = [];
+let currentAprsFilter = 'all';
+let currentAprsTypeFilter = 'all';
+let aprsSearchQuery = '';
+
+// APRS Map variables
+let aprsMap = null;
+let aprsMarkers = [];
+let aprsPolylines = [];
+let myLocationMarker = null;
+let myLocationEnabled = false;
+let myLocationWatchId = null;
+
+// Update the existing updateAprsMessages function to store messages
+const originalUpdateAprsMessages = updateAprsMessages;
+updateAprsMessages = function(messages) {
+    allAprsMessages = messages || [];
+    updateAprsFilterCounts();
+    displayFilteredAprsMessages();
+    
+    // Update map if on map view
+    if (currentView === 'aprs-map' && aprsMap) {
+        updateAprsMap();
+    }
+};
+
+// Filter APRS messages by direction (all, received, sent)
+function filterAprsMessages(filter) {
+    currentAprsFilter = filter;
+    
+    // Update tab button states
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.getAttribute('data-filter') === filter) {
+            btn.classList.add('active');
+        }
+    });
+    
+    displayFilteredAprsMessages();
+}
+
+// Filter APRS messages by type
+function filterAprsMessagesByType() {
+    const typeFilter = document.getElementById('aprs-type-filter');
+    if (typeFilter) {
+        currentAprsTypeFilter = typeFilter.value;
+    }
+    displayFilteredAprsMessages();
+}
+
+// Search APRS messages
+function searchAprsMessages() {
+    const searchInput = document.getElementById('aprs-search');
+    if (searchInput) {
+        aprsSearchQuery = searchInput.value.trim().toLowerCase();
+    }
+    displayFilteredAprsMessages();
+}
+
+// Update filter counts
+function updateAprsFilterCounts() {
+    const allCount = allAprsMessages.length;
+    const receivedCount = allAprsMessages.filter(m => m.direction === 'received').length;
+    const sentCount = allAprsMessages.filter(m => m.direction === 'sent').length;
+    
+    const allCountEl = document.getElementById('aprs-count-all');
+    const receivedCountEl = document.getElementById('aprs-count-received');
+    const sentCountEl = document.getElementById('aprs-count-sent');
+    
+    if (allCountEl) allCountEl.textContent = allCount;
+    if (receivedCountEl) receivedCountEl.textContent = receivedCount;
+    if (sentCountEl) sentCountEl.textContent = sentCount;
+}
+
+// Display filtered APRS messages
+function displayFilteredAprsMessages() {
+    const container = document.getElementById('aprs-messages');
+    if (!container) return;
+    
+    // Apply filters
+    let filteredMessages = allAprsMessages;
+    
+    // Direction filter
+    if (currentAprsFilter !== 'all') {
+        filteredMessages = filteredMessages.filter(m => m.direction === currentAprsFilter);
+    }
+    
+    // Type filter
+    if (currentAprsTypeFilter !== 'all') {
+        filteredMessages = filteredMessages.filter(m => m.dataType === currentAprsTypeFilter);
+    }
+    
+    // Search filter
+    if (aprsSearchQuery) {
+        filteredMessages = filteredMessages.filter(m => {
+            return (m.source && m.source.toLowerCase().includes(aprsSearchQuery)) ||
+                   (m.destination && m.destination.toLowerCase().includes(aprsSearchQuery)) ||
+                   (m.message && m.message.toLowerCase().includes(aprsSearchQuery));
+        });
+    }
+    
+    // Display messages
+    if (filteredMessages.length === 0) {
+        container.innerHTML = '<div class="no-data">No APRS messages match the current filters</div>';
+        return;
+    }
+    
+    let html = '';
+    filteredMessages.forEach(msg => {
+        const time = formatTime(msg.localTime || msg.timestamp);
+        const messageText = truncateText(msg.message, 50);
+        const dataType = msg.dataType || 'Message';
+        const direction = msg.direction || 'received';
+        
+        // Add CSS class based on data type for styling
+        const typeClass = dataType.toLowerCase().replace(/[^a-z]/g, '');
+        const directionBadge = direction === 'sent' ? 
+            '<span class="direction-badge direction-sent">SENT</span>' : 
+            '<span class="direction-badge direction-received">RX</span>';
+        
+        html += `
+            <div class="aprs-message aprs-${typeClass}">
+                <div class="aprs-source">${escapeHtml(msg.source)} ${directionBadge}</div>
+                <div class="aprs-destination">${escapeHtml(msg.destination)}</div>
+                <div class="aprs-type">${escapeHtml(dataType)}</div>
+                <div class="aprs-text">${escapeHtml(messageText)}</div>
+                <div class="aprs-time">${escapeHtml(time)}</div>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
+}
+
+// ============================================================================
+// APRS MAP FUNCTIONALITY
+// ============================================================================
+
+// Initialize APRS map when switching to map view
+function initializeAprsMap() {
+    if (aprsMap) {
+        return; // Map already initialized
+    }
+    
+    const mapContainer = document.getElementById('aprs-map-container');
+    if (!mapContainer) {
+        console.error('Map container not found');
+        return;
+    }
+    
+    // Remove loading message
+    mapContainer.innerHTML = '';
+    
+    try {
+        // Create map centered on a default location (will be updated when markers are added)
+        aprsMap = L.map('aprs-map-container').setView([37.7749, -122.4194], 10);
+        
+        // Add OpenStreetMap tile layer
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            maxZoom: 19
+        }).addTo(aprsMap);
+        
+        console.log('APRS map initialized');
+        
+        // Load initial markers
+        updateAprsMap();
+        
+    } catch (error) {
+        console.error('Failed to initialize APRS map:', error);
+        mapContainer.innerHTML = '<div class="map-loading">Failed to load map</div>';
+    }
+}
+
+// Update APRS map with station positions
+function updateAprsMap() {
+    if (!aprsMap) {
+        console.log('Map not initialized yet');
+        return;
+    }
+    
+    // Clear existing markers and polylines
+    aprsMarkers.forEach(marker => aprsMap.removeLayer(marker));
+    aprsMarkers = [];
+    aprsPolylines.forEach(line => aprsMap.removeLayer(line));
+    aprsPolylines = [];
+    
+    // Get all messages with position data
+    const positionMessages = allAprsMessages.filter(m => m.position && m.position.latitude && m.position.longitude);
+    
+    if (positionMessages.length === 0) {
+        console.log('No APRS position data to display');
+        return;
+    }
+    
+    // Group messages by station to get latest position and create paths
+    const stationPositions = new Map();
+    
+    positionMessages.forEach(msg => {
+        const station = msg.source;
+        if (!stationPositions.has(station)) {
+            stationPositions.set(station, []);
+        }
+        stationPositions.get(station).push({
+            lat: msg.position.latitude,
+            lng: msg.position.longitude,
+            timestamp: new Date(msg.timestamp),
+            comment: msg.position.comment || '',
+            altitude: msg.position.altitude,
+            weather: msg.weather
+        });
+    });
+    
+    // Create markers and paths for each station
+    const bounds = [];
+    
+    stationPositions.forEach((positions, station) => {
+        // Sort by timestamp
+        positions.sort((a, b) => a.timestamp - b.timestamp);
+        
+        // Get latest position
+        const latest = positions[positions.length - 1];
+        bounds.push([latest.lat, latest.lng]);
+        
+        // Create marker for latest position
+        const markerIcon = L.divIcon({
+            className: 'custom-marker',
+            html: '<div style="background-color: #2196F3; color: white; padding: 4px 8px; border-radius: 12px; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">📍</div>',
+            iconSize: [30, 30],
+            iconAnchor: [15, 15]
+        });
+        
+        const marker = L.marker([latest.lat, latest.lng], { icon: markerIcon }).addTo(aprsMap);
+        
+        // Create popup content
+        let popupContent = `<div class="popup-callsign">${escapeHtml(station)}</div>`;
+        popupContent += `<div class="popup-info">`;
+        popupContent += `<strong>Last Update:</strong> ${latest.timestamp.toLocaleString()}<br>`;
+        if (latest.altitude) {
+            popupContent += `<strong>Altitude:</strong> ${latest.altitude} m<br>`;
+        }
+        if (latest.comment) {
+            popupContent += `<strong>Comment:</strong> ${escapeHtml(latest.comment)}<br>`;
+        }
+        if (latest.weather) {
+            popupContent += `<strong>Weather:</strong><br>`;
+            if (latest.weather.temperature) popupContent += `Temp: ${latest.weather.temperature}°F<br>`;
+            if (latest.weather.windSpeed) popupContent += `Wind: ${latest.weather.windSpeed}mph @ ${latest.weather.windDirection}°<br>`;
+        }
+        popupContent += `</div>`;
+        popupContent += `<div class="popup-coords">${latest.lat.toFixed(5)}, ${latest.lng.toFixed(5)}</div>`;
+        
+        marker.bindPopup(popupContent);
+        aprsMarkers.push(marker);
+        
+        // Create path if "Show Paths" is enabled and there are multiple positions
+        const showPathsCheck = document.getElementById('show-paths-check');
+        if (showPathsCheck && showPathsCheck.checked && positions.length > 1) {
+            const latlngs = positions.map(pos => [pos.lat, pos.lng]);
+            const polyline = L.polyline(latlngs, {
+                color: '#2196F3',
+                weight: 2,
+                opacity: 0.6,
+                dashArray: '5, 10'
+            }).addTo(aprsMap);
+            aprsPolylines.push(polyline);
+        }
+    });
+    
+    // Fit map to show all markers
+    if (bounds.length > 0) {
+        aprsMap.fitBounds(bounds, { padding: [50, 50] });
+    }
+    
+    console.log(`Updated map with ${aprsMarkers.length} markers`);
+}
+
+// Center map on all stations
+function centerMapOnStations() {
+    if (!aprsMap || aprsMarkers.length === 0) {
+        console.log('No markers to center on');
+        return;
+    }
+    
+    const bounds = aprsMarkers.map(marker => marker.getLatLng());
+    aprsMap.fitBounds(bounds, { padding: [50, 50] });
+}
+
+// Toggle path display
+function togglePaths() {
+    updateAprsMap(); // Refresh map with updated path setting
+}
+
+// Toggle my location on map
+function toggleMyLocation() {
+    const btn = document.getElementById('my-location-btn');
+    
+    if (myLocationEnabled) {
+        // Disable location tracking
+        myLocationEnabled = false;
+        if (btn) btn.classList.remove('active');
+        
+        // Stop watching position
+        if (myLocationWatchId !== null) {
+            navigator.geolocation.clearWatch(myLocationWatchId);
+            myLocationWatchId = null;
+        }
+        
+        // Remove marker
+        if (myLocationMarker) {
+            aprsMap.removeLayer(myLocationMarker);
+            myLocationMarker = null;
+        }
+        
+        console.log('My location disabled');
+    } else {
+        // Enable location tracking
+        if (!navigator.geolocation) {
+            alert('Geolocation is not supported by your browser');
+            return;
+        }
+        
+        myLocationEnabled = true;
+        if (btn) btn.classList.add('active');
+        
+        // Start watching position
+        myLocationWatchId = navigator.geolocation.watchPosition(
+            (position) => {
+                updateMyLocation(position.coords.latitude, position.coords.longitude);
+            },
+            (error) => {
+                console.error('Geolocation error:', error);
+                alert('Unable to get your location: ' + error.message);
+                myLocationEnabled = false;
+                if (btn) btn.classList.remove('active');
+            },
+            {
+                enableHighAccuracy: true,
+                maximumAge: 10000,
+                timeout: 5000
+            }
+        );
+        
+        console.log('My location enabled');
+    }
+}
+
+// Update my location marker on map
+function updateMyLocation(lat, lng) {
+    if (!aprsMap) return;
+    
+    if (myLocationMarker) {
+        // Update existing marker
+        myLocationMarker.setLatLng([lat, lng]);
+    } else {
+        // Create new marker
+        const myIcon = L.divIcon({
+            className: 'my-location-marker',
+            html: '<div style="background-color: #4CAF50; color: white; padding: 6px 10px; border-radius: 16px; font-weight: bold; box-shadow: 0 2px 6px rgba(0,0,0,0.4); border: 2px solid white;">🏠 Me</div>',
+            iconSize: [60, 30],
+            iconAnchor: [30, 15]
+        });
+        
+        myLocationMarker = L.marker([lat, lng], { icon: myIcon }).addTo(aprsMap);
+        
+        const popupContent = `
+            <div class="popup-callsign">My Location</div>
+            <div class="popup-coords">${lat.toFixed(5)}, ${lng.toFixed(5)}</div>
+        `;
+        myLocationMarker.bindPopup(popupContent);
+        
+        // Center map on my location
+        aprsMap.setView([lat, lng], 13);
+    }
+}
+
+// Watch for view changes to initialize map
+const originalSwitchView = switchView;
+switchView = function(viewName) {
+    originalSwitchView(viewName);
+    
+    // Initialize map when switching to map view
+    if (viewName === 'aprs-map') {
+        setTimeout(() => {
+            initializeAprsMap();
+        }, 100);
+    }
+};
+
+console.log('APRS filtering and map functionality loaded');

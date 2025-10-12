@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Handi-Talky Station</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -42,7 +43,11 @@
 
                     <!-- Other Services -->
                     <li class="nav-separator"></li>
-                    <li><a href="#" class="nav-item" data-view="aprs-messages">APRS Messages</a></li>
+                    <li class="nav-section-header">APRS</li>
+                    <li><a href="#" class="nav-item nav-subsection" data-view="aprs-messages">Messages</a></li>
+                    <li><a href="#" class="nav-item nav-subsection" data-view="aprs-map">Map</a></li>
+                    
+                    <li class="nav-separator"></li>
                     <li><a href="#" class="nav-item" data-view="winlink-mail">WinLink Mail</a></li>
                 </ul>
             </nav>
@@ -224,8 +229,59 @@
             <!-- APRS Messages View -->
             <div id="view-aprs-messages" class="content-view">
                 <h2>APRS Messages</h2>
+                
+                <!-- Message Filter Tabs -->
+                <div class="message-tabs">
+                    <button class="tab-btn active" data-filter="all" onclick="filterAprsMessages('all')">
+                        All (<span id="aprs-count-all">0</span>)
+                    </button>
+                    <button class="tab-btn" data-filter="received" onclick="filterAprsMessages('received')">
+                        Received (<span id="aprs-count-received">0</span>)
+                    </button>
+                    <button class="tab-btn" data-filter="sent" onclick="filterAprsMessages('sent')">
+                        Sent (<span id="aprs-count-sent">0</span>)
+                    </button>
+                </div>
+                
+                <!-- Search and Filter -->
+                <div class="message-controls">
+                    <input type="text" id="aprs-search" placeholder="Search by callsign or message..." 
+                           oninput="searchAprsMessages()" class="search-input" />
+                    <select id="aprs-type-filter" onchange="filterAprsMessagesByType()" class="type-filter">
+                        <option value="all">All Types</option>
+                        <option value="Message">Messages</option>
+                        <option value="Position">Position</option>
+                        <option value="Weather">Weather</option>
+                        <option value="Status">Status</option>
+                    </select>
+                </div>
+                
                 <div id="aprs-messages" class="data-section">
                     <div class="loading">Loading...</div>
+                </div>
+            </div>
+            
+            <!-- APRS Map View -->
+            <div id="view-aprs-map" class="content-view">
+                <div class="section-header">
+                    <h2>APRS Map</h2>
+                    <div class="map-controls">
+                        <button onclick="centerMapOnStations()" class="map-control-btn">
+                            🎯 Center on Stations
+                        </button>
+                        <button onclick="toggleMyLocation()" class="map-control-btn" id="my-location-btn">
+                            📍 Show My Location
+                        </button>
+                        <label class="map-control-label">
+                            <input type="checkbox" id="show-paths-check" onchange="togglePaths()" checked />
+                            Show Paths
+                        </label>
+                    </div>
+                </div>
+                
+                <!-- Map Container -->
+                <div id="aprs-map-container" class="map-container">
+                    <div class="map-loading">Loading map...</div>
                 </div>
             </div>
 
@@ -363,6 +419,7 @@
         </main>
     </div>
 
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="script.js"></script>
 </body>
 </html>

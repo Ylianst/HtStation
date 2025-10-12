@@ -130,6 +130,8 @@ class AprsHandler {
             
             let destinationCallsign = '';
             let messageText = '';
+            let positionData = null;
+            let weatherData = null;
             
             // Extract information based on APRS data type
             switch (aprsPacket.dataType) {
@@ -142,6 +144,12 @@ class AprsHandler {
                 case 'Position':
                     destinationCallsign = 'APRS-POSITION';
                     if (aprsPacket.position) {
+                        positionData = {
+                            latitude: aprsPacket.position.latitude,
+                            longitude: aprsPacket.position.longitude,
+                            altitude: aprsPacket.position.altitude,
+                            comment: aprsPacket.comment || ''
+                        };
                         messageText = `Lat: ${aprsPacket.position.latitude}, Lon: ${aprsPacket.position.longitude}`;
                         if (aprsPacket.comment) {
                             messageText += ` - ${aprsPacket.comment}`;
@@ -151,8 +159,8 @@ class AprsHandler {
                 case 'Weather':
                     destinationCallsign = 'APRS-WEATHER';
                     if (aprsPacket.weather) {
-                        const weather = aprsPacket.weather;
-                        messageText = `Temp: ${weather.temperature || 'N/A'}°F, Wind: ${weather.windSpeed || 'N/A'}mph @ ${weather.windDirection || 'N/A'}°`;
+                        weatherData = aprsPacket.weather;
+                        messageText = `Temp: ${weatherData.temperature || 'N/A'}°F, Wind: ${weatherData.windSpeed || 'N/A'}mph @ ${weatherData.windDirection || 'N/A'}°`;
                     }
                     break;
                 case 'Status':
@@ -193,8 +201,11 @@ class AprsHandler {
                 destination: destinationCallsign,
                 message: messageText,
                 dataType: aprsPacket.dataType,
+                direction: 'received', // Add direction tracking
                 timestamp: timestamp,
-                localTime: localTime
+                localTime: localTime,
+                position: positionData,
+                weather: weatherData
             };
             
             // Use timestamp as key for natural sorting (newest first when sorted in reverse)
@@ -470,6 +481,53 @@ class AprsHandler {
         return Math.floor(Math.random() * 1000).toString().padStart(3, '0');
     }
     
+    // Store sent APRS message with direction tracking
+    storeSentAprsMessage(destinationCallsign, messageText) {
+        if (!this.aprsMessageStorage) {
+            return false;
+        }
+        
+        try {
+            const now = new Date();
+            const timestamp = now.toISOString();
+            const localTime = now.toLocaleString('en-US', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: false
+            });
+            
+            const sourceCallsign = `${this.config.CALLSIGN}-${this.config.STATIONID}`;
+            
+            const messageRecord = {
+                source: sourceCallsign,
+                destination: destinationCallsign,
+                message: messageText,
+                dataType: 'Message',
+                direction: 'sent', // Mark as sent message
+                timestamp: timestamp,
+                localTime: localTime,
+                position: null,
+                weather: null
+            };
+            
+            const storageKey = `aprs-msg-${now.getTime()}`;
+            
+            if (this.aprsMessageStorage.save(storageKey, messageRecord)) {
+                console.log(`[APRS Storage] Stored sent message to ${destinationCallsign}: "${messageText}"`);
+                this.cleanupOldAprsMessages();
+                return true;
+            }
+            return false;
+        } catch (error) {
+            console.error('[APRS Storage] Error storing sent message:', error);
+            return false;
+        }
+    }
+    
     // Generic method to send APRS messages with retry logic
     sendMessage(destinationCallsign, messageText, requiresAuth = null) {
         // Auto-detect authentication requirement if not specified
@@ -503,6 +561,9 @@ class AprsHandler {
             console.error(`[APRS Send] Failed to send initial message to ${destinationCallsign}`);
             return false;
         }
+        
+        // Store sent message in database
+        this.storeSentAprsMessage(destinationCallsign, messageText);
         
         // Add to outgoing queue for ACK tracking
         const queueKey = `${destinationCallsign.toUpperCase()}:${seqId}`;
