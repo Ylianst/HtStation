@@ -13,12 +13,13 @@ const JokeGame = require('./games-joke');
 const YappTransfer = require('./yapp');
 
 class BbsServer extends EventEmitter {
-    constructor(config, radio) {
+    constructor(config, radio, sessionRegistry) {
         super();
         this.config = config;
         this.radio = radio;
         this.RADIO_CALLSIGN = config.CALLSIGN;
         this.RADIO_STATIONID = config.STATIONID;
+        this.sessionRegistry = sessionRegistry; // Global session registry for coordination
         
         // === AX25 Session Management for BBS Mode ===
         this.activeSessions = new Map(); // Map of session keys to session objects
@@ -92,6 +93,34 @@ class BbsServer extends EventEmitter {
         return addresses[1].callSignWithId;
     }
     
+    // Send DM (Disconnect Mode) response to indicate server is busy
+    sendBusyResponse(packet) {
+        if (!packet.addresses || packet.addresses.length < 2) return;
+        
+        // Create DM packet with swapped addresses
+        const replyAddresses = [packet.addresses[1], packet.addresses[0]];
+        const dmPacket = new AX25Packet(
+            replyAddresses,
+            0,
+            0,
+            true,  // poll/final bit set
+            false, // response frame
+            AX25Packet.FrameType.U_FRAME_DM
+        );
+        
+        dmPacket.channel_id = packet.channel_id;
+        dmPacket.channel_name = packet.channel_name;
+        
+        const serialized = dmPacket.toByteArray ? dmPacket.toByteArray() : (dmPacket.ToByteArray ? dmPacket.ToByteArray() : null);
+        if (serialized && typeof this.radio.sendTncFrame === 'function') {
+            this.radio.sendTncFrame({
+                channel_id: packet.channel_id,
+                data: serialized
+            });
+            console.log('[BBS Server] Sent DM (busy) response');
+        }
+    }
+    
     // Helper function to create or get session for BBS mode
     getOrCreateBbsSession(packet) {
         if (!packet.addresses || packet.addresses.length < 2) return null;
@@ -101,6 +130,13 @@ class BbsServer extends EventEmitter {
         
         let session = this.activeSessions.get(sessionKey);
         if (!session) {
+            // Check if this station is busy with another server
+            if (this.sessionRegistry && !this.sessionRegistry.canCreateSession(sessionKey, 'bbs')) {
+                console.log(`[BBS Session] ${sessionKey} is busy with another server, sending DM`);
+                this.sendBusyResponse(packet);
+                return null;
+            }
+            
             console.log(`[BBS Session] Creating new session for ${sessionKey}`);
             session = new AX25Session({ 
                 callsign: this.RADIO_CALLSIGN, 
@@ -114,6 +150,11 @@ class BbsServer extends EventEmitter {
             session.on('stateChanged', (state) => {
                 console.log(`[BBS Session] ${sessionKey} state changed to ${state}`);
                 if (state === AX25Session.ConnectionState.CONNECTED) {
+                    // Register session in global registry
+                    if (this.sessionRegistry) {
+                        this.sessionRegistry.registerSession(sessionKey, 'bbs');
+                    }
+                    
                     // Record session start time and initialize menu state
                     this.sessionStartTimes.set(sessionKey, new Date());
                     this.sessionMenuStates.set(sessionKey, 'main'); // Start in main menu
@@ -139,6 +180,11 @@ class BbsServer extends EventEmitter {
                     session.send(Buffer.from(welcomeMessage), true); // Use immediate sending
                 } else if (state === AX25Session.ConnectionState.DISCONNECTED) {
                     console.log(`[BBS Session] Removing disconnected session for ${sessionKey}`);
+                    
+                    // Unregister session from global registry
+                    if (this.sessionRegistry) {
+                        this.sessionRegistry.unregisterSession(sessionKey);
+                    }
                     
                     // Get session statistics before removing session
                     const sessionStats = session.sessionStatistics;

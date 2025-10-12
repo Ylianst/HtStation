@@ -175,8 +175,243 @@ function handleWebSocketMessage(data) {
             console.log('Bulletin create result:', data);
             handleBulletinCreateResult(data);
             break;
+        case 'winlink_mails':
+            console.log('Processing winlink_mails:', data.mails);
+            updateWinlinkMails(data.mails);
+            break;
+        case 'mail_delete_result':
+            console.log('Mail delete result:', data);
+            handleMailDeleteResult(data);
+            break;
+        case 'mail_compose_result':
+            console.log('Mail compose result:', data);
+            handleMailComposeResult(data);
+            break;
         default:
             console.log('Unknown message type:', data.type);
+    }
+}
+
+// Global mail state
+let winlinkMails = { inbox: [], outbox: [], draft: [], sent: [], archive: [], trash: [] };
+let currentMailFolder = 'inbox';
+let selectedMailMid = null;
+
+// WinLink Mail Functions
+function updateWinlinkMails(mails) {
+    console.log('Updating WinLink mails:', mails);
+    winlinkMails = mails;
+    
+    // Update folder counts
+    document.getElementById('inbox-count').textContent = mails.inbox ? mails.inbox.length : 0;
+    document.getElementById('outbox-count').textContent = mails.outbox ? mails.outbox.length : 0;
+    document.getElementById('draft-count').textContent = mails.draft ? mails.draft.length : 0;
+    document.getElementById('sent-count').textContent = mails.sent ? mails.sent.length : 0;
+    document.getElementById('archive-count').textContent = mails.archive ? mails.archive.length : 0;
+    document.getElementById('trash-count').textContent = mails.trash ? mails.trash.length : 0;
+    
+    // Refresh mail list if on mail view
+    if (currentView === 'winlink-mail') {
+        displayMailList();
+    }
+}
+
+function selectMailFolder(folder) {
+    console.log('Selecting folder:', folder);
+    currentMailFolder = folder;
+    
+    // Update active state on buttons
+    document.querySelectorAll('.folder-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    const folderBtn = document.querySelector(`[data-folder="${folder}"]`);
+    if (folderBtn) {
+        folderBtn.classList.add('active');
+    }
+    
+    // Clear selection
+    selectedMailMid = null;
+    
+    // Display mails for selected folder
+    displayMailList();
+}
+
+function displayMailList() {
+    const mailList = document.getElementById('mail-list');
+    if (!mailList) return;
+    
+    const mails = winlinkMails[currentMailFolder] || [];
+    console.log(`Displaying ${mails.length} mails for ${currentMailFolder}`);
+    
+    if (mails.length === 0) {
+        mailList.innerHTML = '<div class="no-data">No mails in this folder</div>';
+        // Clear detail view
+        const mailDetail = document.getElementById('mail-detail');
+        if (mailDetail) {
+            mailDetail.innerHTML = '<div class="no-mail-selected"><p>No mails in this folder</p></div>';
+        }
+        return;
+    }
+    
+    let html = '';
+    mails.forEach(mail => {
+        const mailDate = formatMailDate(mail.dateTime);
+        const bodyPreview = (mail.body || '').substring(0, 60);
+        const isSelected = selectedMailMid === mail.mid;
+        
+        html += `
+            <div class="mail-item ${mail.isUnread ? 'unread' : ''} ${isSelected ? 'selected' : ''}" 
+                 onclick="selectMail('${mail.mid}')">
+                <div class="mail-item-header">
+                    <span class="mail-from">${escapeHtml(mail.from)}</span>
+                    <span class="mail-date">${mailDate}</span>
+                </div>
+                <div class="mail-subject">${escapeHtml(mail.subject)}</div>
+                <div class="mail-preview">${escapeHtml(bodyPreview)}${bodyPreview.length >= 60 ? '...' : ''}</div>
+                ${mail.attachmentCount > 0 || mail.isUnread || mail.isPrivate ? `
+                    <div class="mail-badges">
+                        ${mail.isUnread ? '<span class="mail-badge unread">UNREAD</span>' : ''}
+                        ${mail.isPrivate ? '<span class="mail-badge private">PRIVATE</span>' : ''}
+                        ${mail.attachmentCount > 0 ? `<span class="mail-badge attachment">📎 ${mail.attachmentCount}</span>` : ''}
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    });
+    
+    mailList.innerHTML = html;
+}
+
+function selectMail(mid) {
+    console.log('Selecting mail:', mid);
+    selectedMailMid = mid;
+    
+    // Find the mail
+    const mails = winlinkMails[currentMailFolder] || [];
+    const mail = mails.find(m => m.mid === mid);
+    
+    if (!mail) {
+        console.error('Mail not found:', mid);
+        return;
+    }
+    
+    // Update selected state in list
+    document.querySelectorAll('.mail-item').forEach(item => {
+        item.classList.remove('selected');
+    });
+    event.target.closest('.mail-item').classList.add('selected');
+    
+    // Display mail detail
+    displayMailDetail(mail);
+}
+
+function displayMailDetail(mail) {
+    const mailDetail = document.getElementById('mail-detail');
+    if (!mailDetail) return;
+    
+    const mailDate = formatMailDateTime(mail.dateTime);
+    const isInTrash = currentMailFolder === 'trash';
+    
+    let html = `
+        <div class="mail-detail-header">
+            <div class="mail-header-top">
+                <div class="mail-detail-subject">${escapeHtml(mail.subject)}</div>
+                <button class="delete-mail-btn" onclick="confirmDeleteMail('${mail.mid}', ${isInTrash})" title="${isInTrash ? 'Permanently delete this email' : 'Move to trash'}">
+                    ${isInTrash ? '🗑️ Delete Permanently' : '🗑️ Delete'}
+                </button>
+            </div>
+            <div class="mail-detail-info">
+                <div class="mail-detail-row">
+                    <span class="mail-detail-label">From:</span>
+                    <span class="mail-detail-value">${escapeHtml(mail.from)}</span>
+                </div>
+                <div class="mail-detail-row">
+                    <span class="mail-detail-label">To:</span>
+                    <span class="mail-detail-value">${escapeHtml(mail.to)}</span>
+                </div>
+                ${mail.cc ? `
+                    <div class="mail-detail-row">
+                        <span class="mail-detail-label">CC:</span>
+                        <span class="mail-detail-value">${escapeHtml(mail.cc)}</span>
+                    </div>
+                ` : ''}
+                <div class="mail-detail-row">
+                    <span class="mail-detail-label">Date:</span>
+                    <span class="mail-detail-value">${mailDate}</span>
+                </div>
+                <div class="mail-detail-row">
+                    <span class="mail-detail-label">MID:</span>
+                    <span class="mail-detail-value">${escapeHtml(mail.mid)}</span>
+                </div>
+            </div>
+        </div>
+        <div class="mail-detail-body">${escapeHtml(mail.body)}</div>
+    `;
+    
+    if (mail.attachmentCount > 0) {
+        html += `
+            <div class="mail-detail-attachments">
+                <h4>Attachments (${mail.attachmentCount})</h4>
+                <div class="attachment-list">
+                    <div class="attachment-item">
+                        <span class="attachment-icon">📎</span>
+                        <span class="attachment-name">Attachment information not available</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    mailDetail.innerHTML = html;
+}
+
+function formatMailDate(dateTimeStr) {
+    if (!dateTimeStr) return '--';
+    
+    try {
+        const date = new Date(dateTimeStr);
+        const now = new Date();
+        const diffDays = Math.floor((now - date) / (1000 * 60 * 60 * 24));
+        
+        if (diffDays === 0) {
+            // Today - show time only
+            return date.toLocaleTimeString('en-US', {
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
+            });
+        } else if (diffDays < 7) {
+            // This week - show day name
+            return date.toLocaleDateString('en-US', { weekday: 'short' });
+        } else {
+            // Older - show date
+            return date.toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric'
+            });
+        }
+    } catch (error) {
+        console.error('Error formatting mail date:', error);
+        return '--';
+    }
+}
+
+function formatMailDateTime(dateTimeStr) {
+    if (!dateTimeStr) return '--';
+    
+    try {
+        const date = new Date(dateTimeStr);
+        return date.toLocaleString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+        });
+    } catch (error) {
+        console.error('Error formatting mail datetime:', error);
+        return '--';
     }
 }
 
@@ -1118,6 +1353,294 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Initial count
         updateCharacterCount();
+    }
+});
+
+// WinLink Mail Deletion Functions
+function confirmDeleteMail(mid, isInTrash) {
+    const mails = winlinkMails[currentMailFolder] || [];
+    const mail = mails.find(m => m.mid === mid);
+    
+    if (!mail) {
+        console.error('Mail not found:', mid);
+        return;
+    }
+    
+    const action = isInTrash ? 'permanently delete' : 'move to trash';
+    const confirmed = confirm(
+        `Are you sure you want to ${action} this email?\n\n` +
+        `From: ${mail.from}\n` +
+        `Subject: ${mail.subject}\n\n` +
+        (isInTrash ? 'This action cannot be undone!' : 'You can recover it from the Trash folder later.')
+    );
+    
+    if (confirmed) {
+        deleteMail(mid, isInTrash);
+    }
+}
+
+function deleteMail(mid, permanent) {
+    console.log(`Requesting ${permanent ? 'permanent deletion' : 'trash'} of mail:`, mid);
+    
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        alert('WebSocket connection not available. Cannot delete mail.');
+        return;
+    }
+    
+    // Disable the delete button to prevent double-clicks
+    const deleteButton = document.querySelector('.delete-mail-btn');
+    if (deleteButton) {
+        deleteButton.disabled = true;
+        deleteButton.textContent = permanent ? '🗑️ Deleting...' : '🗑️ Moving...';
+    }
+    
+    sendMessage({
+        type: 'delete_mail',
+        mid: mid,
+        permanent: permanent
+    });
+}
+
+function handleMailDeleteResult(data) {
+    const { success, error, mid, permanent } = data;
+    
+    if (success) {
+        const action = permanent ? 'permanently deleted' : 'moved to trash';
+        console.log(`Successfully ${action} mail ${mid}`);
+        showNotification(`Email ${action} successfully`, 'success');
+        
+        // Clear the selection and detail view
+        selectedMailMid = null;
+        const mailDetail = document.getElementById('mail-detail');
+        if (mailDetail) {
+            mailDetail.innerHTML = '<div class="no-mail-selected"><p>Select a mail to view its contents</p></div>';
+        }
+        
+        // The mail list will be automatically updated via WebSocket
+    } else {
+        console.error(`Failed to delete mail ${mid}:`, error);
+        alert(`Failed to delete mail: ${error}`);
+        
+        // Re-enable the delete button on failure
+        const deleteButton = document.querySelector('.delete-mail-btn');
+        if (deleteButton) {
+            deleteButton.disabled = false;
+            deleteButton.textContent = permanent ? '🗑️ Delete Permanently' : '🗑️ Delete';
+        }
+    }
+}
+
+// Email Composition Functions
+function toggleComposeForm() {
+    const form = document.getElementById('compose-form');
+    const toggleBtn = document.getElementById('toggle-compose-btn');
+    
+    if (!form || !toggleBtn) return;
+    
+    if (form.style.display === 'none' || form.style.display === '') {
+        showComposeForm();
+    } else {
+        hideComposeForm();
+    }
+}
+
+function showComposeForm() {
+    const form = document.getElementById('compose-form');
+    const toggleBtn = document.getElementById('toggle-compose-btn');
+    const emailTo = document.getElementById('email-to');
+    
+    if (form) {
+        form.style.display = 'block';
+        // Smooth slide-down animation
+        form.style.opacity = '0';
+        form.style.transform = 'translateY(-20px)';
+        setTimeout(() => {
+            form.style.opacity = '1';
+            form.style.transform = 'translateY(0)';
+        }, 10);
+    }
+    
+    if (toggleBtn) {
+        toggleBtn.textContent = '×';
+        toggleBtn.title = 'Cancel';
+        toggleBtn.classList.add('active');
+    }
+    
+    // Focus on To field
+    if (emailTo) {
+        setTimeout(() => {
+            emailTo.focus();
+        }, 300);
+    }
+    updateEmailCharCount();
+}
+
+function hideComposeForm() {
+    const form = document.getElementById('compose-form');
+    const toggleBtn = document.getElementById('toggle-compose-btn');
+    
+    if (form) {
+        // Smooth slide-up animation
+        form.style.opacity = '0';
+        form.style.transform = 'translateY(-20px)';
+        setTimeout(() => {
+            form.style.display = 'none';
+        }, 300);
+    }
+    
+    if (toggleBtn) {
+        toggleBtn.textContent = '+';
+        toggleBtn.title = 'Compose New Email';
+        toggleBtn.classList.remove('active');
+    }
+    
+    // Clear form when hiding
+    clearComposeForm();
+}
+
+function clearComposeForm() {
+    const emailTo = document.getElementById('email-to');
+    const emailSubject = document.getElementById('email-subject');
+    const emailBody = document.getElementById('email-body');
+    const charCount = document.getElementById('email-char-count');
+    
+    if (emailTo) emailTo.value = '';
+    if (emailSubject) emailSubject.value = '';
+    if (emailBody) emailBody.value = '';
+    if (charCount) charCount.textContent = '0';
+    
+    if (emailTo) emailTo.focus();
+}
+
+function sendEmail() {
+    composeEmailAction(false); // false = send to outbox
+}
+
+function saveDraft() {
+    composeEmailAction(true); // true = save as draft
+}
+
+function composeEmailAction(isDraft) {
+    const emailTo = document.getElementById('email-to');
+    const emailSubject = document.getElementById('email-subject');
+    const emailBody = document.getElementById('email-body');
+    const sendBtn = document.getElementById('send-email-btn');
+    const draftBtn = document.getElementById('draft-email-btn');
+    
+    if (!emailTo || !emailSubject || !emailBody) {
+        console.error('Compose form elements not found');
+        return;
+    }
+    
+    const to = emailTo.value.trim();
+    const subject = emailSubject.value.trim();
+    const body = emailBody.value.trim();
+    
+    // Validation
+    if (!to) {
+        alert('Please enter a recipient callsign.');
+        emailTo.focus();
+        return;
+    }
+    
+    if (!subject) {
+        alert('Please enter a subject.');
+        emailSubject.focus();
+        return;
+    }
+    
+    if (!body) {
+        alert('Please enter a message.');
+        emailBody.focus();
+        return;
+    }
+    
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        alert('WebSocket connection not available. Cannot send email.');
+        return;
+    }
+    
+    // Disable form during submission
+    if (sendBtn) {
+        sendBtn.disabled = true;
+        sendBtn.textContent = isDraft ? 'Saving...' : 'Sending...';
+    }
+    if (draftBtn) draftBtn.disabled = true;
+    emailTo.disabled = true;
+    emailSubject.disabled = true;
+    emailBody.disabled = true;
+    
+    console.log(`${isDraft ? 'Saving draft' : 'Sending email'} to ${to}`);
+    
+    sendMessage({
+        type: 'compose_mail',
+        to: to,
+        subject: subject,
+        body: body,
+        isDraft: isDraft
+    });
+}
+
+function handleMailComposeResult(data) {
+    const { success, error, isDraft } = data;
+    const sendBtn = document.getElementById('send-email-btn');
+    const draftBtn = document.getElementById('draft-email-btn');
+    const emailTo = document.getElementById('email-to');
+    const emailSubject = document.getElementById('email-subject');
+    const emailBody = document.getElementById('email-body');
+    
+    // Re-enable form
+    if (sendBtn) {
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'Send Email';
+    }
+    if (draftBtn) {
+        draftBtn.disabled = false;
+    }
+    if (emailTo) emailTo.disabled = false;
+    if (emailSubject) emailSubject.disabled = false;
+    if (emailBody) emailBody.disabled = false;
+    
+    if (success) {
+        const action = isDraft ? 'saved as draft' : 'sent to outbox';
+        console.log(`Successfully ${action}`);
+        // Clear the form
+        clearComposeForm();
+        // Hide the form
+        hideComposeForm();
+        // Show success notification
+        showNotification(`Email ${action} successfully!`, 'success');
+        // The mail list will be automatically updated via WebSocket
+    } else {
+        console.error(`Failed to ${isDraft ? 'save draft' : 'send email'}:`, error);
+        alert(`Failed to ${isDraft ? 'save draft' : 'send email'}: ${error}`);
+        if (emailTo) emailTo.focus();
+    }
+}
+
+function updateEmailCharCount() {
+    const emailBody = document.getElementById('email-body');
+    const charCount = document.getElementById('email-char-count');
+    
+    if (emailBody && charCount) {
+        const currentLength = emailBody.value.length;
+        charCount.textContent = currentLength;
+    }
+}
+
+// Set up email compose character counting when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    // Set up email body character counting
+    const emailBody = document.getElementById('email-body');
+    if (emailBody) {
+        emailBody.addEventListener('input', updateEmailCharCount);
+        emailBody.addEventListener('keyup', updateEmailCharCount);
+        emailBody.addEventListener('paste', function() {
+            setTimeout(updateEmailCharCount, 10);
+        });
+        
+        // Initial count
+        updateEmailCharCount();
     }
 });
 

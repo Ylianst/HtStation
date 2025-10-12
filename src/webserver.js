@@ -7,11 +7,12 @@ const WebSocket = require('ws');
 const os = require('os');
 
 class WebServer {
-    constructor(config, radio, bbsServer, aprsHandler) {
+    constructor(config, radio, bbsServer, aprsHandler, winlinkServer) {
         this.config = config;
         this.radio = radio;
         this.bbsServer = bbsServer;
         this.aprsHandler = aprsHandler;
+        this.winlinkServer = winlinkServer;
         
         this.httpServer = null;
         this.wsServer = null;
@@ -29,7 +30,8 @@ class WebServer {
             BBS_CONNECTIONS: 'bbs_connections',
             APRS_MESSAGES: 'aprs_messages',
             SESSION_DATA: 'session_data',
-            BULLETINS: 'bulletins'
+            BULLETINS: 'bulletins',
+            WINLINK_MAILS: 'winlink_mails'
         };
         
         // Setup event listeners for real-time updates
@@ -194,6 +196,12 @@ class WebServer {
             case 'create_bulletin':
                 this.handleBulletinCreation(ws, data);
                 break;
+            case 'delete_mail':
+                this.handleMailDeletion(ws, data);
+                break;
+            case 'compose_mail':
+                this.handleMailComposition(ws, data);
+                break;
             default:
                 console.log('[WebServer] Unknown WebSocket message type:', data.type);
         }
@@ -206,6 +214,7 @@ class WebServer {
         this.sendBbsConnections(ws);
         this.sendAprsMessages(ws);
         this.sendBulletins(ws);
+        this.sendWinlinkMails(ws);
     }
     
     sendAllData(ws) {
@@ -293,6 +302,87 @@ class WebServer {
         };
         
         this.sendToClients(data, ws);
+    }
+    
+    sendWinlinkMails(ws = null) {
+        const mails = this.getWinlinkMails();
+        
+        const data = {
+            type: this.EVENT_TYPES.WINLINK_MAILS,
+            timestamp: new Date().toISOString(),
+            mails: mails
+        };
+        
+        this.sendToClients(data, ws);
+    }
+    
+    getWinlinkMails() {
+        console.log('[WebServer] getWinlinkMails called');
+        
+        if (!this.winlinkServer) {
+            console.log('[WebServer] No WinLink server available');
+            return { inbox: [], outbox: [], draft: [], sent: [], archive: [], trash: [] };
+        }
+        
+        try {
+            console.log('[WebServer] Retrieving WinLink mails');
+            const allMails = this.winlinkServer.mails || [];
+            
+            // Organize by mailbox
+            const inbox = [];
+            const outbox = [];
+            const draft = [];
+            const sent = [];
+            const archive = [];
+            const trash = [];
+            
+            for (const mail of allMails) {
+                const mailData = {
+                    mid: mail.mid,
+                    from: mail.from,
+                    to: mail.to,
+                    cc: mail.cc || '',
+                    subject: mail.subject || '(no subject)',
+                    body: mail.body || '',
+                    dateTime: mail.dateTime,
+                    flags: mail.flags || 0,
+                    isUnread: (mail.flags & 1) !== 0,
+                    isPrivate: (mail.flags & 2) !== 0,
+                    attachmentCount: mail.attachments ? mail.attachments.length : 0
+                };
+                
+                // Mailbox values: 0=inbox, 1=outbox, 2=draft, 3=sent, 4=archive, 5=trash
+                if (mail.mailbox === 0) {
+                    inbox.push(mailData);
+                } else if (mail.mailbox === 1) {
+                    outbox.push(mailData);
+                } else if (mail.mailbox === 2) {
+                    draft.push(mailData);
+                } else if (mail.mailbox === 3) {
+                    sent.push(mailData);
+                } else if (mail.mailbox === 4) {
+                    archive.push(mailData);
+                } else if (mail.mailbox === 5) {
+                    trash.push(mailData);
+                }
+            }
+            
+            // Sort by date (newest first)
+            const sortByDate = (a, b) => new Date(b.dateTime) - new Date(a.dateTime);
+            inbox.sort(sortByDate);
+            outbox.sort(sortByDate);
+            draft.sort(sortByDate);
+            sent.sort(sortByDate);
+            archive.sort(sortByDate);
+            trash.sort(sortByDate);
+            
+            console.log(`[WebServer] Retrieved ${inbox.length} inbox, ${outbox.length} outbox, ${draft.length} draft, ${sent.length} sent, ${archive.length} archive, ${trash.length} trash mails`);
+            
+            return { inbox, outbox, draft, sent, archive, trash };
+        } catch (error) {
+            console.error('[WebServer] Error retrieving WinLink mails:', error);
+            return { inbox: [], outbox: [], draft: [], sent: [], archive: [], trash: [] };
+        }
     }
     
     getBulletinHistory() {
@@ -523,6 +613,178 @@ class WebServer {
                 type: 'bulletin_create_result',
                 success: false,
                 error: 'Internal error creating bulletin'
+            });
+        }
+    }
+    
+    handleMailDeletion(ws, data) {
+        console.log('[WebServer] Handling mail deletion request:', data);
+        
+        if (!this.winlinkServer) {
+            this.sendResponse(ws, {
+                type: 'mail_delete_result',
+                success: false,
+                error: 'WinLink server not available',
+                mid: data.mid,
+                permanent: data.permanent
+            });
+            return;
+        }
+        
+        const { mid, permanent } = data;
+        
+        if (!mid) {
+            this.sendResponse(ws, {
+                type: 'mail_delete_result',
+                success: false,
+                error: 'Mail ID is required',
+                mid: mid,
+                permanent: permanent
+            });
+            return;
+        }
+        
+        try {
+            // Find the mail in the WinLink server's mail array
+            const mailIndex = this.winlinkServer.mails.findIndex(m => m.mid === mid);
+            
+            if (mailIndex === -1) {
+                this.sendResponse(ws, {
+                    type: 'mail_delete_result',
+                    success: false,
+                    error: 'Mail not found',
+                    mid: mid,
+                    permanent: permanent
+                });
+                return;
+            }
+            
+            const mail = this.winlinkServer.mails[mailIndex];
+            
+            if (permanent) {
+                // Permanently delete the mail
+                this.winlinkServer.mails.splice(mailIndex, 1);
+                console.log(`[WebServer] Permanently deleted mail ${mid}`);
+                
+                // Save to storage if available
+                if (this.winlinkServer.storage) {
+                    this.winlinkServer.storage.save('winlink-mails', this.winlinkServer.mails);
+                }
+                
+                this.sendResponse(ws, {
+                    type: 'mail_delete_result',
+                    success: true,
+                    mid: mid,
+                    permanent: true
+                });
+            } else {
+                // Move to trash (mailbox 5)
+                mail.mailbox = 5;
+                console.log(`[WebServer] Moved mail ${mid} to trash`);
+                
+                // Save to storage if available
+                if (this.winlinkServer.storage) {
+                    this.winlinkServer.storage.save('winlink-mails', this.winlinkServer.mails);
+                }
+                
+                this.sendResponse(ws, {
+                    type: 'mail_delete_result',
+                    success: true,
+                    mid: mid,
+                    permanent: false
+                });
+            }
+            
+            // Broadcast updated mail list to all clients
+            this.sendWinlinkMails();
+            
+        } catch (error) {
+            console.error('[WebServer] Error deleting mail:', error);
+            this.sendResponse(ws, {
+                type: 'mail_delete_result',
+                success: false,
+                error: 'Internal error deleting mail',
+                mid: mid,
+                permanent: permanent
+            });
+        }
+    }
+    
+    handleMailComposition(ws, data) {
+        console.log('[WebServer] Handling mail composition request:', data);
+        
+        if (!this.winlinkServer) {
+            this.sendResponse(ws, {
+                type: 'mail_compose_result',
+                success: false,
+                error: 'WinLink server not available',
+                isDraft: data.isDraft
+            });
+            return;
+        }
+        
+        const { to, subject, body, isDraft } = data;
+        
+        // Validation
+        if (!to || !subject || !body) {
+            this.sendResponse(ws, {
+                type: 'mail_compose_result',
+                success: false,
+                error: 'To, subject, and body are required',
+                isDraft: isDraft
+            });
+            return;
+        }
+        
+        try {
+            // Generate unique MID (Message ID)
+            const crypto = require('crypto');
+            const mid = crypto.randomBytes(6).toString('hex').toUpperCase();
+            
+            // Get station callsign as sender
+            const from = this.config.CALLSIGN;
+            
+            // Create new mail object
+            const newMail = {
+                mid: mid,
+                from: from,
+                to: to.toUpperCase(),
+                cc: '',
+                subject: subject,
+                body: body,
+                dateTime: new Date().toISOString(),
+                flags: 0, // Not unread, not private
+                mailbox: isDraft ? 2 : 1, // 2=draft, 1=outbox
+                attachments: []
+            };
+            
+            // Add to WinLink server's mail array
+            this.winlinkServer.mails.push(newMail);
+            
+            console.log(`[WebServer] Created ${isDraft ? 'draft' : 'outbox'} mail ${mid} from ${from} to ${to}`);
+            
+            // Save to storage if available
+            if (this.winlinkServer.storage) {
+                this.winlinkServer.storage.save('winlink-mails', this.winlinkServer.mails);
+            }
+            
+            this.sendResponse(ws, {
+                type: 'mail_compose_result',
+                success: true,
+                mid: mid,
+                isDraft: isDraft
+            });
+            
+            // Broadcast updated mail list to all clients
+            this.sendWinlinkMails();
+            
+        } catch (error) {
+            console.error('[WebServer] Error composing mail:', error);
+            this.sendResponse(ws, {
+                type: 'mail_compose_result',
+                success: false,
+                error: 'Internal error composing mail',
+                isDraft: isDraft
             });
         }
     }

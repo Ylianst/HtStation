@@ -43,11 +43,30 @@ for (const [key, value] of Object.entries(config)) {
 
 const RADIO_MAC_ADDRESS = config.MACADDRESS;
 const RADIO_CALLSIGN = config.CALLSIGN;
-const RADIO_STATIONID = config.STATIONID ? parseInt(config.STATIONID, 10) : undefined;
-if (!RADIO_MAC_ADDRESS || !RADIO_CALLSIGN || RADIO_STATIONID === undefined || isNaN(RADIO_STATIONID)) {
-    console.error('[App] Missing required settings in config.ini (MACADDRESS, CALLSIGN, STATIONID).');
+
+// Parse station IDs for servers (0-15 are valid, -1 means disabled)
+const BBS_STATION_ID = config.BBS_STATION_ID ? parseInt(config.BBS_STATION_ID, 10) : -1;
+const ECHO_STATION_ID = config.ECHO_STATION_ID ? parseInt(config.ECHO_STATION_ID, 10) : -1;
+const WINLINK_STATION_ID = config.WINLINK_STATION_ID ? parseInt(config.WINLINK_STATION_ID, 10) : -1;
+
+if (!RADIO_MAC_ADDRESS || !RADIO_CALLSIGN) {
+    console.error('[App] Missing required settings in config.ini (MACADDRESS, CALLSIGN).');
     process.exit(1);
 }
+
+// Validate station IDs
+const isBbsEnabled = BBS_STATION_ID >= 0 && BBS_STATION_ID <= 15;
+const isEchoEnabled = ECHO_STATION_ID >= 0 && ECHO_STATION_ID <= 15;
+const isWinlinkEnabled = WINLINK_STATION_ID >= 0 && WINLINK_STATION_ID <= 15;
+
+if (!isBbsEnabled && !isEchoEnabled && !isWinlinkEnabled) {
+    console.error('[App] At least one server must be enabled. Set BBS_STATION_ID, ECHO_STATION_ID, or WINLINK_STATION_ID to a value between 0 and 15.');
+    process.exit(1);
+}
+
+console.log(`[App] BBS Server: ${isBbsEnabled ? `ENABLED on ${RADIO_CALLSIGN}-${BBS_STATION_ID}` : 'DISABLED'}`);
+console.log(`[App] Echo Server: ${isEchoEnabled ? `ENABLED on ${RADIO_CALLSIGN}-${ECHO_STATION_ID}` : 'DISABLED'}`);
+console.log(`[App] WinLink Server: ${isWinlinkEnabled ? `ENABLED on ${RADIO_CALLSIGN}-${WINLINK_STATION_ID}` : 'DISABLED'}`);
 
 // === Background server mode ===
 if (process.argv.includes('--server') && !process.env._HTC_BG) {
@@ -94,16 +113,78 @@ const { AprsPacket } = require('./aprs');
 const AprsHandler = require('./aprs.js');
 const EchoServer = require('./echoserver.js');
 const BbsServer = require('./bbs.js');
+const WinLinkServer = require('./winlinkserver.js');
 const WebServer = require('./webserver.js');
+const Storage = require('./storage.js');
+
+// === Global Session Registry ===
+// Coordinates sessions between BBS, Echo, and WinLink servers to ensure only one server
+// handles a connection with a remote station at a time
+const activeSessionRegistry = {
+    sessions: new Map(), // Maps callsign -> server type ('bbs', 'echo', 'winlink')
+    
+    canCreateSession(callsign, serverType) {
+        const existingServer = this.sessions.get(callsign);
+        if (!existingServer) return true;
+        if (existingServer === serverType) return true;
+        console.log(`[Session Registry] ${callsign} is busy with ${existingServer} server, cannot create ${serverType} session`);
+        return false; // Different server has this session
+    },
+    
+    isStationConnected(callsign) {
+        return this.sessions.has(callsign);
+    },
+    
+    registerSession(callsign, session, serverType) {
+        console.log(`[Session Registry] Registering ${callsign} with ${serverType} server`);
+        this.sessions.set(callsign, serverType);
+    },
+    
+    unregisterSession(callsign) {
+        console.log(`[Session Registry] Unregistering ${callsign}`);
+        this.sessions.delete(callsign);
+    },
+    
+    getActiveServer(callsign) {
+        return this.sessions.get(callsign);
+    }
+};
 
 // Initialize APRS handler
 const aprsHandler = new AprsHandler(config, radio, mqttReporter);
 
-// Initialize Echo Server
-const echoServer = new EchoServer(config, radio);
+// Initialize Echo Server (conditionally)
+let echoServer = null;
+if (isEchoEnabled) {
+    const echoConfig = { ...config, CALLSIGN: RADIO_CALLSIGN, STATIONID: ECHO_STATION_ID };
+    echoServer = new EchoServer(echoConfig, radio, activeSessionRegistry);
+    console.log(`[App] Echo Server initialized on ${RADIO_CALLSIGN}-${ECHO_STATION_ID}`);
+}
 
-// Initialize BBS Server
-const bbsServer = new BbsServer(config, radio);
+// Initialize BBS Server (conditionally)
+let bbsServer = null;
+if (isBbsEnabled) {
+    const bbsConfig = { ...config, CALLSIGN: RADIO_CALLSIGN, STATIONID: BBS_STATION_ID };
+    bbsServer = new BbsServer(bbsConfig, radio, activeSessionRegistry);
+    console.log(`[App] BBS Server initialized on ${RADIO_CALLSIGN}-${BBS_STATION_ID}`);
+}
+
+// Initialize Storage for WinLink
+const storage = new Storage();
+
+// Initialize WinLink Server (conditionally)
+let winlinkServer = null;
+if (isWinlinkEnabled) {
+    const winlinkConfig = { 
+        ...config, 
+        callsign: RADIO_CALLSIGN, 
+        winlinkStationId: WINLINK_STATION_ID,
+        winlinkPassword: config.WINLINK_PASSWORD || '',
+        version: '1.0'
+    };
+    winlinkServer = new WinLinkServer(winlinkConfig, storage, activeSessionRegistry);
+    console.log(`[App] WinLink Server initialized on ${RADIO_CALLSIGN}-${WINLINK_STATION_ID}`);
+}
 
 // Initialize Web Server (if enabled)
 let webServer = null;
@@ -111,7 +192,7 @@ if (config.WEBSERVERPORT) {
     const webServerPort = parseInt(config.WEBSERVERPORT, 10);
     if (webServerPort > 0) {
         try {
-            webServer = new WebServer(config, radio, bbsServer, aprsHandler);
+            webServer = new WebServer(config, radio, bbsServer, aprsHandler, winlinkServer);
             webServer.start(webServerPort)
                 .then(() => {
                     console.log(`[App] Web server started successfully on port ${webServerPort}`);
@@ -168,16 +249,37 @@ radio.on('data', (frame) => {
             return;
         }
         
-        // Handle echo server functionality
-        if (config.SERVER && config.SERVER.toLowerCase() === 'echo') {
-            echoServer.processPacket(packet);
-            return;
-        }
+        // Route packet to appropriate server based on destination SSID
+        let processed = false;
         
-        // Handle BBS server functionality
-        if (config.SERVER && config.SERVER.toLowerCase() === 'bbs') {
-            bbsServer.processPacket(packet);
-            return;
+        // Check if packet addresses our station
+        if (packet.addresses && packet.addresses.length >= 1) {
+            const firstAddr = packet.addresses[0];
+            
+            // Try BBS server if enabled and packet is addressed to BBS SSID
+            if (bbsServer && firstAddr.address === RADIO_CALLSIGN && firstAddr.SSID == BBS_STATION_ID) {
+                console.log(`[App] Routing packet to BBS Server (${RADIO_CALLSIGN}-${BBS_STATION_ID})`);
+                bbsServer.processPacket(packet);
+                processed = true;
+            }
+            
+            // Try Echo server if enabled and packet is addressed to Echo SSID (and not already processed)
+            if (!processed && echoServer && firstAddr.address === RADIO_CALLSIGN && firstAddr.SSID == ECHO_STATION_ID) {
+                console.log(`[App] Routing packet to Echo Server (${RADIO_CALLSIGN}-${ECHO_STATION_ID})`);
+                echoServer.processPacket(packet);
+                processed = true;
+            }
+            
+            // Try WinLink server if enabled and packet is addressed to WinLink SSID (and not already processed)
+            if (!processed && winlinkServer && firstAddr.address === RADIO_CALLSIGN && firstAddr.SSID == WINLINK_STATION_ID) {
+                console.log(`[App] Routing packet to WinLink Server (${RADIO_CALLSIGN}-${WINLINK_STATION_ID})`);
+                winlinkServer.processPacket(packet, radio);
+                processed = true;
+            }
+            
+            if (!processed) {
+                console.log(`[App] Packet not addressed to any enabled server (dest: ${firstAddr.address}-${firstAddr.SSID})`);
+            }
         }
     } else {
         console.log(`[App] Received TNC data frame on channel ${frame.channel_id}${frame.channel_name ? ` (${frame.channel_name})` : ''}:`, frame.data);

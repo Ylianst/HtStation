@@ -32,6 +32,7 @@
                     <li><a href="#" class="nav-item" data-view="last-connections">Last Connections</a></li>
                     <li><a href="#" class="nav-item" data-view="aprs-messages">APRS Messages</a></li>
                     <li><a href="#" class="nav-item" data-view="bulletins">Active Bulletins</a></li>
+                    <li><a href="#" class="nav-item" data-view="winlink-mail">WinLink Mail</a></li>
                 </ul>
             </nav>
             
@@ -163,6 +164,101 @@
                 
                 <div id="bulletins" class="data-section">
                     <div class="loading">Loading...</div>
+                </div>
+            </div>
+
+            <!-- WinLink Mail View -->
+            <div id="view-winlink-mail" class="content-view">
+                <div class="section-header">
+                    <h2>WinLink Mail</h2>
+                    <button id="toggle-compose-btn" class="add-bulletin-btn" onclick="toggleComposeForm()" title="Compose New Email">
+                        +
+                    </button>
+                </div>
+                
+                <!-- Email Composition Form (hidden by default) -->
+                <div id="compose-form" class="bulletin-create-form" style="display: none;">
+                    <h3>Compose New Email</h3>
+                    <div class="form-group">
+                        <label for="email-to">To (callsign):</label>
+                        <input type="text" id="email-to" class="compose-input" placeholder="Enter recipient callsign..." maxlength="50" />
+                    </div>
+                    <div class="form-group">
+                        <label for="email-subject">Subject:</label>
+                        <input type="text" id="email-subject" class="compose-input" placeholder="Enter email subject..." maxlength="100" />
+                    </div>
+                    <div class="form-group">
+                        <label for="email-body">Message:</label>
+                        <textarea 
+                            id="email-body" 
+                            class="bulletin-textarea" 
+                            placeholder="Enter your message here..."
+                            rows="8"
+                        ></textarea>
+                        <div class="char-counter">
+                            <span id="email-char-count">0</span> characters
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button id="send-email-btn" onclick="sendEmail()">Send Email</button>
+                        <button id="draft-email-btn" onclick="saveDraft()">Save as Draft</button>
+                        <button id="clear-email-btn" onclick="clearComposeForm()">Clear</button>
+                        <button id="cancel-email-btn" onclick="hideComposeForm()">Cancel</button>
+                    </div>
+                </div>
+                
+                <div class="mail-container">
+                    <!-- Mail Folders -->
+                    <div class="mail-sidebar">
+                        <div class="mail-folders">
+                            <button class="folder-btn active" data-folder="inbox" onclick="selectMailFolder('inbox')">
+                                <span class="folder-icon">📥</span>
+                                <span class="folder-name">Inbox</span>
+                                <span class="folder-count" id="inbox-count">0</span>
+                            </button>
+                            <button class="folder-btn" data-folder="outbox" onclick="selectMailFolder('outbox')">
+                                <span class="folder-icon">📤</span>
+                                <span class="folder-name">Outbox</span>
+                                <span class="folder-count" id="outbox-count">0</span>
+                            </button>
+                            <button class="folder-btn" data-folder="draft" onclick="selectMailFolder('draft')">
+                                <span class="folder-icon">📝</span>
+                                <span class="folder-name">Draft</span>
+                                <span class="folder-count" id="draft-count">0</span>
+                            </button>
+                            <button class="folder-btn" data-folder="sent" onclick="selectMailFolder('sent')">
+                                <span class="folder-icon">✉️</span>
+                                <span class="folder-name">Sent</span>
+                                <span class="folder-count" id="sent-count">0</span>
+                            </button>
+                            <button class="folder-btn" data-folder="archive" onclick="selectMailFolder('archive')">
+                                <span class="folder-icon">📦</span>
+                                <span class="folder-name">Archive</span>
+                                <span class="folder-count" id="archive-count">0</span>
+                            </button>
+                            <button class="folder-btn" data-folder="trash" onclick="selectMailFolder('trash')">
+                                <span class="folder-icon">🗑️</span>
+                                <span class="folder-name">Trash</span>
+                                <span class="folder-count" id="trash-count">0</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Mail List -->
+                    <div class="mail-list-container">
+                        <div id="mail-list" class="mail-list">
+                            <div class="loading">Loading mails...</div>
+                        </div>
+                    </div>
+
+                    <!-- Mail Detail -->
+                    <div class="mail-detail-container">
+                        <div id="mail-detail" class="mail-detail">
+                            <div class="no-mail-selected">
+                                <p>Select a mail to view its contents</p>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </main>
