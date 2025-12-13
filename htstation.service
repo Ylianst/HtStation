@@ -1,0 +1,16 @@
+[Unit]
+Description=HtStation Ham Radio Packet Station
+After=network.target
+
+[Service]
+Type=simple
+User=default
+WorkingDirectory=/home/default/HtStation
+ExecStart=/usr/bin/node /home/default/HtStation/htstation.js --run
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
