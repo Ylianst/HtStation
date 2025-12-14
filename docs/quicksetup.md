@@ -1,4 +1,4 @@
-# HtStation Quick Setup Guide
+# Handi-Talky Station Setup Guide
 
 This guide covers the essential steps to configure and start your packet radio station.
 
@@ -9,7 +9,7 @@ Before you begin, ensure you have:
 - ✅ Raspberry Pi (or Linux system) with Bluetooth
 - ✅ Compatible radio (UV-Pro, GA-5WB, VR-N76, VR-N7500, or VR-N7600)
 
-## Quick Setup Overview
+## Setup Overview
 
 This guide will walk you through:
 1. Installing NodeJS and dependencies
