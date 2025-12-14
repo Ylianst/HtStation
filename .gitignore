@@ -140,3 +140,6 @@ vite.config.ts.timestamp-*
 
 # Application data directory (databases, storage files)
 data/
+
+# Configuration file (contains sensitive information like passwords and MAC addresses)
+config.ini
