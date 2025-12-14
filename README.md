@@ -27,6 +27,37 @@ The following radios should work with this application:
 - **File Downloads** - Serve files over packet radio using YAPP protocol.
 - **Interactive Games** - Guess the Number, Blackjack, and Joke of the Day games over BBS.
 
+## Installation
+
+### From NPM (Recommended)
+
+Install globally to use the `htstation` command:
+
+```bash
+npm install -g htstation
+```
+
+Or install locally in a project:
+
+```bash
+npm install htstation
+```
+
+**Note**: This package includes native dependencies that require build tools:
+- **Linux/Raspberry Pi**: `sudo apt-get install bluetooth bluez libbluetooth-dev libudev-dev`
+- **macOS**: Xcode Command Line Tools
+- **Windows**: Visual Studio Build Tools
+
+### From Source
+
+Clone the repository and install dependencies:
+
+```bash
+git clone https://github.com/Ylianst/HtStation.git
+cd HtStation
+npm install
+```
+
 ## Documentation
 
 ### Getting Started

@@ -1,0 +1,79 @@
+# Development and local data files that should not be published to NPM
+
+# Cline rules directory (AI assistant context)
+.clinerules/
+
+# Application data directory (databases, storage files, user data)
+data/
+
+# Memory bank directory (project documentation and context)
+memory-bank/
+
+# Configuration file (contains sensitive information like passwords and MAC addresses)
+config.ini
+
+# Systemd service file (dynamically generated with system-specific paths)
+htstation.service
+*.service
+
+# Development files
+.vscode/
+.vscode-test/
+
+# Git files
+.git/
+.gitignore
+.gitattributes
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Testing
+test/
+tests/
+*.test.js
+*Test.js
+coverage/
+.nyc_output/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# IDE files
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Package manager files
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Build artifacts
+build/
+dist/
+*.tsbuildinfo
+
+# Temporary files
+tmp/
+temp/

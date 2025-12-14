@@ -1,11 +1,40 @@
 {
-  "name": "htcommanderstation",
+  "name": "htstation",
   "version": "0.1.0",
-  "description": "This is a Amateur Radio (HAM Radio) tool for the UV-Pro, GA-5WB, VR-N76, VR-N7500, VR-N7600 radios",
-  "main": "app.js",
-  "keywords": [],
+  "description": "Amateur Radio (HAM Radio) BBS/APRS/WinLink packet station for UV-Pro, GA-5WB, VR-N76, VR-N7500, VR-N7600 radios with web interface",
+  "main": "htstation.js",
+  "bin": {
+    "htstation": "./htstation.js"
+  },
+  "keywords": [
+    "hamradio",
+    "amateur-radio",
+    "aprs",
+    "bbs",
+    "packet-radio",
+    "winlink",
+    "ax25",
+    "uv-pro",
+    "ga-5wb",
+    "vr-n76",
+    "vr-n7500",
+    "vr-n7600",
+    "bluetooth",
+    "raspberry-pi"
+  ],
   "author": "Ylian Saint-Hilaire",
-  "license": "Apache 2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Ylianst/HtStation"
+  },
+  "bugs": {
+    "url": "https://github.com/Ylianst/HtStation/issues"
+  },
+  "homepage": "https://github.com/Ylianst/HtStation#readme",
+  "engines": {
+    "node": ">=14.0.0"
+  },
   "devDependencies": {
     "eslint": "^9.34.0"
   },
