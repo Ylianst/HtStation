@@ -2,8 +2,8 @@
 
 const path = require('path');
 const crypto = require('crypto');
-const { loadConfig } = require('../utils/configLoader');
-const { initializeLogger, getLogger } = require('../utils/consoleLogger');
+const { loadConfig } = require('./utils/configLoader');
+const { initializeLogger, getLogger } = require('./utils/consoleLogger');
 
 // === Check for command line arguments ===
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
@@ -72,7 +72,7 @@ global.logger = logger;
 
 // NOW load modules that depend on global.logger
 const Radio = require('./Radio.js');
-const MqttReporter = require('../utils/MqttReporter');
+const MqttReporter = require('./utils/MqttReporter');
 const RadioController = require('./radioctl.js');
 
 // Display welcome message
@@ -152,7 +152,7 @@ const radioController = new RadioController(config, radio, mqttReporter);
 
 // New handler for received TNC data frames
 const AX25Packet = require('./AX25Packet');
-const { AprsPacket } = require('./aprs');
+const { AprsPacket } = require('./aprs/index.js');
 const AprsHandler = require('./aprs.js');
 const EchoServer = require('./echoserver.js');
 const BbsServer = require('./bbs.js');

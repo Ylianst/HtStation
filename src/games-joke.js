@@ -16,7 +16,7 @@ class JokeGame {
 
     loadJokes() {
         try {
-            const jokesPath = path.join(__dirname, '..', 'jokes.txt');
+            const jokesPath = path.join(__dirname, 'data', 'jokes.txt');
             const jokesData = fs.readFileSync(jokesPath, 'utf8');
             this.jokes = jokesData.split('\n')
                 .map(joke => joke.trim())

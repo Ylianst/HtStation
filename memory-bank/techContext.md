@@ -104,8 +104,11 @@
 data/
 ├── bbs/                    # BBS-specific storage
 ├── winlink/               # WinLink email storage
-├── aprs/                  # APRS message storage
+├── aprs-messages.db       # APRS message storage
 └── bulletins/             # BBS bulletin storage
+
+src/
+└── aprs/                  # APRS library and implementation
 ```
 
 ### Network Architecture

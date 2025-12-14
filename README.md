@@ -29,6 +29,9 @@ The following radios should work with this application:
 
 ## Documentation
 
+### Getting Started
+- [Quick Setup Guide](docs/quicksetup.md) - **Get up and running in 10 minutes!**
+
 ### Configuration
 - [Configuration Guide](docs/config.md) - Complete config.ini reference
 - [Bluetooth Setup](docs/bluetoothhelp.md) - Pairing Bluetooth devices on Raspberry Pi

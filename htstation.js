@@ -66,6 +66,7 @@ const hasInstall = args.includes('--install');
 const hasUninstall = args.includes('--uninstall');
 const hasStart = args.includes('--start');
 const hasStop = args.includes('--stop');
+const hasRestart = args.includes('--restart');
 const hasHelp = args.includes('--help') || args.includes('-h');
 const hasBluetoothHelp = args.includes('--bluetoothhelp');
 
@@ -167,6 +168,7 @@ function showHelp() {
     console.log('  --uninstall        Uninstall systemctl background service');
     console.log('  --start            Start the systemctl service');
     console.log('  --stop             Stop the systemctl service');
+    console.log('  --restart          Restart the systemctl service');
     console.log('');
     console.log('Examples:');
     console.log('  node htstation.js                  Show this help screen');
@@ -176,6 +178,7 @@ function showHelp() {
     console.log('  node htstation.js --install        Install as system service');
     console.log('  node htstation.js --start          Start the service');
     console.log('  node htstation.js --stop           Stop the service');
+    console.log('  node htstation.js --restart        Restart the service');
     console.log('  node htstation.js --uninstall      Remove system service');
     console.log('');
 }
@@ -498,6 +501,44 @@ function stopService() {
 }
 
 /**
+ * Restart systemctl service
+ */
+function restartService() {
+    console.log('Restarting HtStation service...');
+    
+    const serviceName = 'htstation.service';
+    
+    try {
+        // Check if running with sudo/root
+        if (process.getuid && process.getuid() !== 0) {
+            console.log('\nPlease run the following command with sudo:');
+            console.log(`  sudo systemctl restart ${serviceName}`);
+            console.log('');
+            console.log('To check status:');
+            console.log(`  sudo systemctl status ${serviceName}`);
+            return;
+        }
+        
+        // Restart service
+        execSync(`systemctl restart ${serviceName}`);
+        console.log('Service restarted successfully');
+        
+        // Show status
+        console.log('\nService status:');
+        try {
+            const status = execSync(`systemctl status ${serviceName}`, { encoding: 'utf8' });
+            console.log(status);
+        } catch (err) {
+            console.log(err.stdout || err.message);
+        }
+        
+    } catch (err) {
+        console.error('ERROR restarting service:', err.message);
+        process.exit(1);
+    }
+}
+
+/**
  * Uninstall systemctl service
  */
 function uninstallService() {
@@ -594,6 +635,9 @@ if (hasHelp) {
     process.exit(0);
 } else if (hasStop) {
     stopService();
+    process.exit(0);
+} else if (hasRestart) {
+    restartService();
     process.exit(0);
 } else if (hasRun || hasServer) {
     // Check for MACADDRESS before running
