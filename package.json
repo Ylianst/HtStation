@@ -1,6 +1,6 @@
 {
   "name": "htstation",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Amateur Radio (HAM Radio) BBS/APRS/WinLink packet station for UV-Pro, GA-5WB, VR-N76, VR-N7500, VR-N7600 radios with web interface",
   "main": "htstation.js",
   "bin": {
