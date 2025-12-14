@@ -141,5 +141,8 @@ vite.config.ts.timestamp-*
 # Application data directory (databases, storage files)
 data/
 
+# Memory bank directory (project documentation and context)
+memory-bank/
+
 # Configuration file (contains sensitive information like passwords and MAC addresses)
 config.ini
