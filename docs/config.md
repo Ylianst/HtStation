@@ -1,4 +1,4 @@
-# HtStation Configuration Guide
+# Handi-Talky Station Configuration Guide
 
 This document explains all available configuration options in the `config.ini` file.
 
