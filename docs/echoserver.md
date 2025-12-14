@@ -123,7 +123,7 @@ You can test the echo server from the same machine using the web interface or by
 
 ```ini
 # Minimal test configuration
-MACADDRESS=38:D2:00:00:EF:24
+MACADDRESS=A1:B2:C3:D4:E5:F6
 CALLSIGN=N0CALL
 ECHO_STATION_ID=2
 WEBSERVERPORT=8089
@@ -349,7 +349,7 @@ Test cross-station communication by having each connect to others' echo servers.
 
 ```ini
 # Radio connection
-MACADDRESS=38:D2:00:00:EF:24
+MACADDRESS=A1:B2:C3:D4:E5:F6
 CALLSIGN=N0CALL
 
 # Enable only echo server
@@ -368,7 +368,7 @@ CONSOLEMSG=ALL
 
 ```ini
 # Radio connection
-MACADDRESS=38:D2:00:00:EF:24
+MACADDRESS=A1:B2:C3:D4:E5:F6
 CALLSIGN=N0CALL
 
 # Multiple services
@@ -387,7 +387,7 @@ CONSOLEMSG=App,Radio,BBS,Echo,WinLink
 
 ```ini
 # Radio connection
-MACADDRESS=38:D2:00:00:EF:24
+MACADDRESS=A1:B2:C3:D4:E5:F6
 CALLSIGN=N0CALL-9        # Mobile station
 
 # Echo only for field testing

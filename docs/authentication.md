@@ -391,7 +391,7 @@ Bidirectional authentication ensures both stations trust each other.
 
 ```ini
 # Radio connection
-MACADDRESS=38:D2:00:00:EF:24
+MACADDRESS=A1:B2:C3:D4:E5:F6
 CALLSIGN=N0CALL
 
 # Services

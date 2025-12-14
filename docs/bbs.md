@@ -436,7 +436,7 @@ BBS handles multiple stations connecting simultaneously:
 
 ```ini
 # Radio connection
-MACADDRESS=38:D2:00:00:EF:24
+MACADDRESS=A1:B2:C3:D4:E5:F6
 CALLSIGN=N0CALL
 
 # Enable only BBS
@@ -455,7 +455,7 @@ CONSOLEMSG=ALL
 
 ```ini
 # Radio connection
-MACADDRESS=38:D2:00:00:EF:24
+MACADDRESS=A1:B2:C3:D4:E5:F6
 CALLSIGN=N0CALL
 
 # Multiple services
@@ -481,7 +481,7 @@ CONSOLEMSG=App,Radio,BBS
 
 ```ini
 # Radio connection
-MACADDRESS=38:D2:00:00:EF:24
+MACADDRESS=A1:B2:C3:D4:E5:F6
 CALLSIGN=N0CALL
 
 # BBS with support services

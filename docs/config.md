@@ -18,7 +18,7 @@ The `config.ini` file uses a simple key=value format:
 **Description:** The Bluetooth MAC address of your radio device.
 
 ```ini
-MACADDRESS=38:D2:00:00:EF:24
+MACADDRESS=A1:B2:C3:D4:E5:F6
 ```
 
 **Important:** You must pair your radio via Bluetooth before setting this value. See [bluetooth.md](bluetooth.md) for pairing instructions.
@@ -212,7 +212,7 @@ CONSOLEMSG=App,Radio,BBS,WinLink
 
 ```ini
 # Radio connection
-MACADDRESS=38:D2:00:00:EF:24
+MACADDRESS=A1:B2:C3:D4:E5:F6
 CALLSIGN=N0CALL
 
 # Enable BBS service
@@ -233,7 +233,7 @@ CONSOLEMSG=App,Radio,BBS
 
 ```ini
 # Radio connection
-MACADDRESS=38:D2:00:00:EF:24
+MACADDRESS=A1:B2:C3:D4:E5:F6
 CALLSIGN=N0CALL
 
 # All services enabled
@@ -266,7 +266,7 @@ CONSOLEMSG=ALL
 
 ```ini
 # Radio connection
-MACADDRESS=38:D2:00:00:EF:24
+MACADDRESS=A1:B2:C3:D4:E5:F6
 CALLSIGN=N0CALL
 
 # Disable all services (use -1)
@@ -291,7 +291,7 @@ CONSOLEMSG=App,Radio,MQTT
 
 ```ini
 # Radio connection
-MACADDRESS=38:D2:00:00:EF:24
+MACADDRESS=A1:B2:C3:D4:E5:F6
 CALLSIGN=N0CALL
 
 # Only enable Echo service for testing
@@ -337,17 +337,62 @@ CONSOLEMSG=ALL
 
 ## Applying Configuration Changes
 
-After modifying `config.ini`:
+After modifying `config.ini`, you must restart HtStation for changes to take effect.
 
-1. **Save the file**
-2. **Restart HtStation:**
-   ```bash
-   # If running in console mode (--run)
-   Press CTRL+C, then restart with: node htstation.js --run
-   
-   # If running as a service
-   sudo systemctl restart htstation
-   ```
+### Method 1: Using --restart (Recommended for Services)
+
+If HtStation is installed as a systemctl service:
+
+```bash
+sudo node htstation.js --restart
+```
+
+This is the quickest way to apply configuration changes when running as a service.
+
+### Method 2: Console Mode
+
+If running in console mode with `--run`:
+
+```bash
+# Press CTRL+C to stop
+# Then restart with:
+node htstation.js --run
+```
+
+### Method 3: Manual systemctl Commands
+
+If running as a service, you can also use systemctl directly:
+
+```bash
+sudo systemctl restart htstation
+```
+
+### Method 4: Start/Stop Separately
+
+```bash
+# Stop the service
+sudo node htstation.js --stop
+# Or: sudo systemctl stop htstation
+
+# Start the service
+sudo node htstation.js --start
+# Or: sudo systemctl start htstation
+```
+
+### Verify Configuration Changes
+
+After restarting, check that your changes are active:
+
+```bash
+# Check service status
+sudo systemctl status htstation
+
+# View recent logs
+sudo journalctl -u htstation -n 50
+
+# Access web interface
+# Open browser to: http://your-pi-ip:8089
+```
 
 ## Additional Resources
 

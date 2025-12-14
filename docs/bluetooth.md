@@ -48,14 +48,14 @@ Watch the scan results for your radio. It may appear as:
 
 Note the MAC address shown (format: XX:XX:XX:XX:XX:XX)
 
-**Example:** `[NEW] Device 38:D2:00:00:EF:24 UV-Pro`
+**Example:** `[NEW] Device A1:B2:C3:D4:E5:F6 UV-Pro`
 
 ## Step 5: Pair the Device
 
 Once you see your radio, pair it (replace with your MAC address):
 
 ```
-pair 38:D2:00:00:EF:24
+pair A1:B2:C3:D4:E5:F6
 ```
 
 If prompted for a PIN, try these common values:
@@ -68,7 +68,7 @@ If prompted for a PIN, try these common values:
 Mark the device as trusted for automatic reconnection:
 
 ```
-trust 38:D2:00:00:EF:24
+trust A1:B2:C3:D4:E5:F6
 ```
 
 ## Step 7: Connect (Optional)
@@ -76,7 +76,7 @@ trust 38:D2:00:00:EF:24
 You can test the connection now (HtStation will connect automatically):
 
 ```
-connect 38:D2:00:00:EF:24
+connect A1:B2:C3:D4:E5:F6
 ```
 
 ## Step 8: Exit bluetoothctl
@@ -99,7 +99,7 @@ nano config.ini
 Uncomment and update the MACADDRESS line:
 
 ```ini
-MACADDRESS=38:D2:00:00:EF:24
+MACADDRESS=A1:B2:C3:D4:E5:F6
 ```
 
 Save the file (CTRL+O, ENTER, CTRL+X in nano)
