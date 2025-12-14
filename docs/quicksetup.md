@@ -1,35 +1,55 @@
 # HtStation Quick Setup Guide
 
-Get your HtStation up and running in minutes! This guide covers the essential steps to configure and start your packet radio station.
+This guide covers the essential steps to configure and start your packet radio station.
 
 ## Prerequisites
 
 Before you begin, ensure you have:
+- ✅ Amateur radio license and callsign
 - ✅ Raspberry Pi (or Linux system) with Bluetooth
 - ✅ Compatible radio (UV-Pro, GA-5WB, VR-N76, VR-N7500, or VR-N7600)
-- ✅ Amateur radio license and callsign
-- ✅ Node.js installed (version 14 or higher)
-- ✅ HtStation downloaded from GitHub
 
 ## Quick Setup Overview
 
+This guide will walk you through:
+1. Installing NodeJS and dependencies
+2. Pairing your radio via Bluetooth
+3. Configuring HtStation
+4. Testing and installing as a service
+
+## Step 1: Install NodeJS and Dependencies
+
+### 1.1 Install NodeJS and NPM
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_lts.sh | sudo -E bash -
+sudo apt-get install -y nodejs
 ```
-1. Pair Bluetooth → 2. Configure → 3. Test → 4. Install Service
-   (5 minutes)       (2 minutes)    (1 minute)  (1 minute)
+
+Verify installation:
+```bash
+node --version
+npm --version
+```
+
+### 1.2 Install Bluetooth Dependencies
+
+```bash
+sudo apt-get install bluetooth bluez libbluetooth-dev libudev-dev
 ```
 
 ---
 
-## Step 1: Pair Your Radio via Bluetooth
+## Step 2: Pair Your Radio via Bluetooth
 
-### 1.1 Enable Bluetooth on Raspberry Pi
+### 2.1 Enable Bluetooth on Raspberry Pi
 
 ```bash
 sudo systemctl start bluetooth
 sudo systemctl enable bluetooth
 ```
 
-### 1.2 Start Bluetooth Pairing
+### 2.2 Start Bluetooth Pairing
 
 ```bash
 bluetoothctl
@@ -37,7 +57,7 @@ bluetoothctl
 
 You should see: `[bluetooth]#`
 
-### 1.3 Scan and Pair
+### 2.3 Scan and Pair
 
 At the bluetoothctl prompt:
 
@@ -55,7 +75,7 @@ scan on
 
 **Note the MAC address!** You'll need it in the next step.
 
-### 1.4 Complete Pairing
+### 2.4 Complete Pairing
 
 Replace `A1:B2:C3:D4:E5:F6` with your radio's MAC address:
 
@@ -66,39 +86,49 @@ scan off
 exit
 ```
 
-✅ **Done!** Your radio is now paired.
-
 > 📖 **Need more help?** See [bluetoothhelp.md](bluetoothhelp.md) for detailed troubleshooting.
 
 ---
 
-## Step 2: Configure HtStation
+## Step 3: Configure HtStation
 
-### 2.1 Navigate to HtStation Directory
+### 3.1 Create and Setup HtStation Directory
+
+Create a new folder for HtStation in your home directory:
 
 ```bash
-cd /path/to/HtStation
+mkdir ~/htstation
+cd ~/htstation
 ```
 
-### 2.2 Edit config.ini
+### 3.2 Install HtStation
+
+Download and install HtStation using npm:
 
 ```bash
+npm install htstation
+```
+
+### 3.3 Create config.ini from Sample
+
+```bash
+cp config-sample.ini config.ini
 nano config.ini
 ```
 
-### 2.3 Set Required Values
+### 3.4 Set Required Values
 
 **Update these two lines** with your information:
 
 ```ini
-# Your radio's Bluetooth MAC address (from Step 1.3)
+# Your radio's Bluetooth MAC address (from Step 2.3)
 MACADDRESS=A1:B2:C3:D4:E5:F6
 
-# Your amateur radio callsign
+# Your amateur radio callsign (Do not put a stations id like "N0CALL-5")
 CALLSIGN=N0CALL
 ```
 
-### 2.4 Enable Services (Optional but Recommended)
+### 3.5 Enable Services (Optional but Recommended)
 
 Uncomment and set these lines to enable packet radio services:
 
@@ -106,35 +136,25 @@ Uncomment and set these lines to enable packet radio services:
 # Bulletin Board System on YOURCALLSIGN-1
 BBS_STATION_ID=1
 
-# Echo test service on YOURCALLSIGN-2
-ECHO_STATION_ID=2
+# Echo test service on YOURCALLSIGN-3
+ECHO_STATION_ID=3
 
-# WinLink email on YOURCALLSIGN-3
-WINLINK_STATION_ID=3
+# WinLink email on YOURCALLSIGN-2
+WINLINK_STATION_ID=2
 WINLINK_PASSWORD=your_password_here
 ```
 
-### 2.5 Save and Exit
+### 3.6 Save and Exit
 
 Press `CTRL+O` to save, `ENTER` to confirm, then `CTRL+X` to exit.
-
-✅ **Done!** Basic configuration complete.
 
 > 📖 **Want more options?** See [config.md](config.md) for complete configuration reference.
 
 ---
 
-## Step 3: Test Your Setup
+## Step 4: Test Your Setup
 
-### 3.1 Install Dependencies
-
-Make sure all required packages are installed:
-
-```bash
-npm install
-```
-
-### 3.2 Run in Console Mode
+### 4.1 Run in Console Mode
 
 ```bash
 node htstation.js --run
@@ -152,21 +172,14 @@ WinLink server started on N0CALL-3
 Web server started on port 8089
 ```
 
-### 3.3 Access Web Interface
+### 4.3 Access Web Interface
 
 Open a browser and navigate to:
-```
-http://localhost:8089
-```
-
-Or from another device on your network:
 ```
 http://your-pi-ip:8089
 ```
 
-**You should see** the HtStation dashboard with your station information!
-
-### 3.4 Stop Testing
+### 4.4 Stop Testing
 
 Press `CTRL+C` to stop HtStation.
 
@@ -176,11 +189,11 @@ Press `CTRL+C` to stop HtStation.
 
 ---
 
-## Step 4: Install as System Service
+## Step 5: Install as System Service
 
 Install HtStation to run automatically at startup.
 
-### 4.1 Install Service
+### 5.1 Install Service
 
 ```bash
 sudo node htstation.js --install
@@ -193,7 +206,7 @@ Service installed successfully!
 Service is running and enabled for startup.
 ```
 
-### 4.2 Verify Service is Running
+### 5.2 Verify Service is Running
 
 ```bash
 sudo systemctl status htstation
@@ -201,7 +214,7 @@ sudo systemctl status htstation
 
 **Look for:** `Active: active (running)`
 
-### 4.3 Service Management Commands
+### 5.3 Service Management Commands
 
 Now that it's installed, use these commands:
 
@@ -224,8 +237,6 @@ sudo journalctl -u htstation -f
 # Uninstall service
 sudo node htstation.js --uninstall
 ```
-
-✅ **Done!** HtStation will now start automatically when your Raspberry Pi boots.
 
 ---
 
@@ -393,24 +404,3 @@ node htstation.js --bluetoothhelp
 - **GitHub:** https://github.com/Ylianst/HtStation
 - **Issues:** Report bugs and request features on GitHub
 - **Documentation:** All guides available in `docs/` folder
-
----
-
-## Summary Checklist
-
-- [ ] Bluetooth paired and trusted
-- [ ] MACADDRESS set in config.ini
-- [ ] CALLSIGN set in config.ini
-- [ ] Services enabled (BBS, Echo, WinLink)
-- [ ] Dependencies installed (npm install)
-- [ ] Tested with --run
-- [ ] Web interface accessible
-- [ ] Service installed (--install)
-- [ ] Service running (systemctl status)
-- [ ] Bookmarked web dashboard
-
-**Congratulations!** 🎉 Your HtStation is now operational and ready for packet radio operations!
-
----
-
-*Quick Setup Guide - Get up and running in under 10 minutes*
