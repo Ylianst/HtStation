@@ -142,10 +142,10 @@ class WebServer {
     
     handleHttpRequest(req, res) {
         const url = req.url === '/' ? '/index.html' : req.url;
-        const filePath = path.join(__dirname, '..', 'web', url);
+        const filePath = path.join(__dirname, './web', url);
         
         // Security check - prevent directory traversal
-        const webDir = path.join(__dirname, '..', 'web');
+        const webDir = path.join(__dirname, './web');
         const resolvedPath = path.resolve(filePath);
         if (!resolvedPath.startsWith(webDir)) {
             res.writeHead(403);
