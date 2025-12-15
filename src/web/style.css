@@ -543,7 +543,7 @@ body {
 /* APRS message styles */
 .aprs-message {
     display: grid;
-    grid-template-columns: 90px 120px 80px 1fr 90px;
+    grid-template-columns: 90px 90px 1fr 90px;
     gap: 10px;
     align-items: center;
     padding: 8px 12px;
@@ -564,9 +564,12 @@ body {
     color: #856404;
     font-weight: bold;
     font-size: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
 
-.aprs-type {
+.aprs-typeX {
     color: #6f42c1;
     font-weight: bold;
     font-size: 11px;
@@ -574,7 +577,12 @@ body {
     background-color: #f8f9fa;
     padding: 2px 6px;
     border-radius: 3px;
-    text-align: center;
+    text-align: left;
+    align-self: flex-start;
+}
+
+.aprs-type {
+    color: #6f42c1;
 }
 
 .aprs-text {

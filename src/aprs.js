@@ -4,11 +4,13 @@
 const logger = global.logger ? global.logger.getLogger('APRS') : console;
 
 const crypto = require('crypto');
+const EventEmitter = require('events');
 const { AprsPacket } = require('./aprs/index.js');
 const Storage = require('./storage');
 
-class AprsHandler {
+class AprsHandler extends EventEmitter {
     constructor(config, radio, mqttReporter) {
+        super(); // Initialize EventEmitter
         this.config = config;
         this.radio = radio;
         this.mqttReporter = mqttReporter;
@@ -108,6 +110,53 @@ class AprsHandler {
         return this.aprsMessageCache.has(key);
     }
     
+    // Check if an identical message was received in the last 10 minutes
+    isDuplicateInDatabase(sourceCallsign, destinationCallsign, messageText, dataType) {
+        if (!this.aprsMessageStorage) {
+            return false; // Cannot check without storage
+        }
+        
+        try {
+            // Get current time and 10 minutes ago
+            const now = Date.now();
+            const tenMinutesAgo = now - (10 * 60 * 1000);
+            
+            // Get all APRS message keys
+            const messageKeys = this.aprsMessageStorage.list('aprs-msg-%');
+            
+            // Check each message within the time window
+            for (const key of messageKeys) {
+                // Extract timestamp from key (format: aprs-msg-{timestamp})
+                const timestampMatch = key.match(/aprs-msg-(\d+)/);
+                if (!timestampMatch) continue;
+                
+                const messageTimestamp = parseInt(timestampMatch[1]);
+                
+                // Skip messages older than 10 minutes
+                if (messageTimestamp < tenMinutesAgo) continue;
+                
+                // Load the message record
+                const record = this.aprsMessageStorage.load(key);
+                if (!record) continue;
+                
+                // Check if it's an exact match
+                if (record.source === sourceCallsign &&
+                    record.destination === destinationCallsign &&
+                    record.message === messageText &&
+                    record.dataType === dataType &&
+                    record.direction === 'received') {
+                    logger.log(`[APRS] Duplicate detected in database: ${sourceCallsign} > ${destinationCallsign} from ${new Date(messageTimestamp).toISOString()}`);
+                    return true;
+                }
+            }
+            
+            return false; // No duplicate found
+        } catch (error) {
+            logger.error('[APRS] Error checking for duplicates in database:', error);
+            return false; // On error, allow the message through
+        }
+    }
+    
     // Store ALL APRS data for BBS retrieval (all packet types)
     storeAllAprsData(aprsPacket, packet) {
         if (!this.aprsMessageStorage) {
@@ -145,15 +194,18 @@ class AprsHandler {
                     }
                     break;
                 case 'Position':
+                case 'PositionMsg':
+                case 'PositionTime':
+                case 'PositionTimeMsg':
                     destinationCallsign = 'APRS-POSITION';
-                    if (aprsPacket.position) {
+                    if (aprsPacket.position && aprsPacket.position.isValid()) {
                         positionData = {
-                            latitude: aprsPacket.position.latitude,
-                            longitude: aprsPacket.position.longitude,
+                            latitude: aprsPacket.position.coordinateSet.latitude.value,
+                            longitude: aprsPacket.position.coordinateSet.longitude.value,
                             altitude: aprsPacket.position.altitude,
                             comment: aprsPacket.comment || ''
                         };
-                        messageText = `Lat: ${aprsPacket.position.latitude}, Lon: ${aprsPacket.position.longitude}`;
+                        messageText = `Lat: ${aprsPacket.position.coordinateSet.latitude.value.toFixed(6)}, Lon: ${aprsPacket.position.coordinateSet.longitude.value.toFixed(6)}`;
                         if (aprsPacket.comment) {
                             messageText += ` - ${aprsPacket.comment}`;
                         }
@@ -199,6 +251,12 @@ class AprsHandler {
                 return false; // Don't store messages for our station
             }
             
+            // Check for duplicate in database (last 10 minutes)
+            if (this.isDuplicateInDatabase(sourceCallsign, destinationCallsign, messageText, aprsPacket.dataType)) {
+                logger.log(`[APRS Storage] Skipping duplicate message from ${sourceCallsign} > ${destinationCallsign} received within last 10 minutes`);
+                return false; // Don't store duplicate
+            }
+            
             const messageRecord = {
                 source: sourceCallsign,
                 destination: destinationCallsign,
@@ -216,6 +274,19 @@ class AprsHandler {
             
             if (this.aprsMessageStorage.save(storageKey, messageRecord)) {
                 logger.log(`[APRS Storage] Stored ${aprsPacket.dataType} from ${sourceCallsign} > ${destinationCallsign}: "${messageText}"`);
+                
+                // Emit event for real-time WebSocket broadcast
+                this.emit('aprsMessageReceived', {
+                    source: sourceCallsign,
+                    destination: destinationCallsign,
+                    message: messageText,
+                    dataType: aprsPacket.dataType,
+                    direction: 'received',
+                    timestamp: timestamp,
+                    localTime: localTime,
+                    position: positionData,
+                    weather: weatherData
+                });
                 
                 // Maintain message limit
                 this.cleanupOldAprsMessages();
@@ -519,10 +590,24 @@ class AprsHandler {
             
             const storageKey = `aprs-msg-${now.getTime()}`;
             
-            if (this.aprsMessageStorage.save(storageKey, messageRecord)) {
-                logger.log(`[APRS Storage] Stored sent message to ${destinationCallsign}: "${messageText}"`);
-                this.cleanupOldAprsMessages();
-                return true;
+        if (this.aprsMessageStorage.save(storageKey, messageRecord)) {
+            logger.log(`[APRS Storage] Stored sent message to ${destinationCallsign}: "${messageText}"`);
+            
+            // Emit event for real-time WebSocket broadcast
+            this.emit('aprsMessageReceived', {
+                source: sourceCallsign,
+                destination: destinationCallsign,
+                message: messageText,
+                dataType: 'Message',
+                direction: 'sent',
+                timestamp: timestamp,
+                localTime: localTime,
+                position: null,
+                weather: null
+            });
+            
+            this.cleanupOldAprsMessages();
+            return true;
             }
             return false;
         } catch (error) {
@@ -840,10 +925,8 @@ class AprsHandler {
                         this.mqttReporter.publishStatus(aprsMessageTopic, messageData);
                         logger.log(`[MQTT] Published to ${sensorType} sensor: "${formattedMessage}"`);
                         
-                        // Store APRS messages that are NOT for our station (for BBS retrieval)
-                        if (!isForUs) {
-                            this.storeAprsMessage(senderCallsign, addressee, messageText);
-                        }
+                        // Note: All APRS messages are already stored by storeAllAprsData() above
+                        // No need to store again here to avoid duplicates
                     } else if (isDuplicateMessage) {
                         logger.log(`[APRS] Duplicate message detected from ${senderCallsign} with sequence ${messageSeqId} - skipping MQTT publish`);
                     } else if (isAckMessage) {

@@ -133,8 +133,16 @@ class WebServer {
             }, 5000); // Check every 5 seconds
         }
         
-        // Monitor for new APRS messages (we'll need to modify aprs.js to emit events)
-        // For now, we'll poll for new messages
+        // Monitor for new APRS messages - real-time via events
+        if (this.aprsHandler) {
+            this.aprsHandler.on('aprsMessageReceived', (messageData) => {
+                logger.log('[WebServer] Received APRS message event:', messageData);
+                this.broadcastAprsMessage(messageData);
+            });
+            logger.log('[WebServer] APRS message event listener registered');
+        }
+        
+        // Update system status periodically
         setInterval(() => {
             this.broadcastSystemStatus();
         }, 10000); // Update system status every 10 seconds
@@ -659,18 +667,18 @@ class WebServer {
         this.sendToClients(data);
     }
     
-    broadcastAprsMessage(sourceCallsign, destinationCallsign, messageText) {
+    broadcastAprsMessage(messageData) {
+        // messageData already contains: source, destination, message, dataType, direction, timestamp, localTime, position, weather
         const data = {
             type: this.EVENT_TYPES.APRS_MESSAGE,
             timestamp: new Date().toISOString(),
-            source: sourceCallsign,
-            destination: destinationCallsign,
-            message: messageText
+            ...messageData
         };
         
+        logger.log('[WebServer] Broadcasting APRS message to clients:', data);
         this.sendToClients(data);
         
-        // Also update the full message list
+        // Also update the full message list to ensure synchronization
         this.sendAprsMessages();
     }
     

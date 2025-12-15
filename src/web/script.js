@@ -987,24 +987,14 @@ function getTimeAgo(timeString) {
     }
 }
 
-// Auto-refresh functionality
-setInterval(() => {
-    if (autoRefresh && ws && ws.readyState === WebSocket.OPEN) {
-        sendMessage({ type: 'refresh_data' });
-    }
-}, 30000); // Refresh every 30 seconds
-
-// Handle page visibility changes
-document.addEventListener('visibilitychange', function() {
-    if (document.visibilityState === 'visible' && autoRefresh) {
-        // Page became visible, refresh data
-        setTimeout(() => {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                sendMessage({ type: 'refresh_data' });
-            }
-        }, 1000);
-    }
-});
+// Auto-refresh removed - now fully event-driven via WebSocket
+// Real-time updates are received via WebSocket events:
+// - aprs_message: individual APRS messages
+// - system_status: periodic status (10s interval from server)
+// - session_data: BBS session data
+// - bulletins: bulletin updates
+// - winlink_mails: mail updates
+// Users can still manually refresh using the refresh button if needed
 
 // Session Terminal Management Functions
 function handleSessionData(data) {
@@ -1995,6 +1985,18 @@ function updateAprsFilterCounts() {
     if (sentCountEl) sentCountEl.textContent = sentCount;
 }
 
+// Helper function to normalize APRS data type for display
+function normalizeAprsDataType(dataType) {
+    if (!dataType) return 'Message';
+    
+    // Normalize all position types to just "Position"
+    if (dataType === 'PositionMsg' || dataType === 'PositionTime' || dataType === 'PositionTimeMsg') {
+        return 'Position';
+    }
+    
+    return dataType;
+}
+
 // Display filtered APRS messages
 function displayFilteredAprsMessages() {
     const container = document.getElementById('aprs-messages');
@@ -2010,7 +2012,10 @@ function displayFilteredAprsMessages() {
     
     // Type filter
     if (currentAprsTypeFilter !== 'all') {
-        filteredMessages = filteredMessages.filter(m => m.dataType === currentAprsTypeFilter);
+        filteredMessages = filteredMessages.filter(m => {
+            const normalizedType = normalizeAprsDataType(m.dataType);
+            return normalizedType === currentAprsTypeFilter;
+        });
     }
     
     // Search filter
@@ -2032,11 +2037,12 @@ function displayFilteredAprsMessages() {
     filteredMessages.forEach(msg => {
         const time = formatTime(msg.localTime || msg.timestamp);
         const messageText = truncateText(msg.message, 50);
-        const dataType = msg.dataType || 'Message';
+        const rawDataType = msg.dataType || 'Message';
+        const displayDataType = normalizeAprsDataType(rawDataType);
         const direction = msg.direction || 'received';
         
         // Add CSS class based on data type for styling
-        const typeClass = dataType.toLowerCase().replace(/[^a-z]/g, '');
+        const typeClass = displayDataType.toLowerCase().replace(/[^a-z]/g, '');
         const directionBadge = direction === 'sent' ? 
             '<span class="direction-badge direction-sent">SENT</span>' : 
             '<span class="direction-badge direction-received">RX</span>';
@@ -2044,8 +2050,10 @@ function displayFilteredAprsMessages() {
         html += `
             <div class="aprs-message aprs-${typeClass}">
                 <div class="aprs-source">${escapeHtml(msg.source)} ${directionBadge}</div>
-                <div class="aprs-destination">${escapeHtml(msg.destination)}</div>
-                <div class="aprs-type">${escapeHtml(dataType)}</div>
+                <div class="aprs-destination">
+                    <div>${escapeHtml(msg.destination)}</div>
+                    <div class="aprs-type">${escapeHtml(displayDataType)}</div>
+                </div>
                 <div class="aprs-text">${escapeHtml(messageText)}</div>
                 <div class="aprs-time">${escapeHtml(time)}</div>
             </div>

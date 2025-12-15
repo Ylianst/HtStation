@@ -155,42 +155,51 @@ function convertLonToNmea(lon) {
 }
 
 /**
- * Convert NMEA format to decimal degrees
- * @param {string} nmea - NMEA format coordinate string
+ * Convert NMEA/APRS format to decimal degrees
+ * @param {string} nmea - NMEA/APRS format coordinate string
  * @returns {number} Decimal degrees
  */
 function convertNmeaToFloat(nmea) {
     try {
         if (!nmea || nmea.length === 0) return 0;
         
-        let d = 0;
+        nmea = nmea.trim();
+        const upper = nmea.toUpperCase();
         
-        // Latitude (8 characters: DDMM.MMN)
-        if (nmea.length === 8) {
-            d = parseFloat(nmea.substring(0, 2)); // degrees
-            d += parseFloat(nmea.substring(2, 7)) / 60; // minutes
-            
-            // Last character is compass direction
-            if (nmea.toUpperCase().endsWith('S')) {
-                d = -d;
-            }
-            return d;
+        // Get direction from last character
+        const lastChar = upper[upper.length - 1];
+        const isNegative = (lastChar === 'S' || lastChar === 'W');
+        
+        // Remove direction character
+        const coordStr = nmea.substring(0, nmea.length - 1);
+        
+        let degrees = 0;
+        let minutes = 0;
+        
+        // Determine if this is latitude (DDMM.HH) or longitude (DDDMM.HH)
+        // Latitude: 2 digit degrees (DD), longitude: 3 digit degrees (DDD)
+        if (lastChar === 'N' || lastChar === 'S') {
+            // Latitude: DDMM.HH format (e.g., "4523.45")
+            degrees = parseFloat(coordStr.substring(0, 2));
+            minutes = parseFloat(coordStr.substring(2));
+        } else if (lastChar === 'E' || lastChar === 'W') {
+            // Longitude: DDDMM.HH format (e.g., "12245.67")
+            degrees = parseFloat(coordStr.substring(0, 3));
+            minutes = parseFloat(coordStr.substring(3));
+        } else {
+            // Invalid format
+            return 0;
         }
         
-        // Longitude (9 characters: DDDMM.MME)
-        if (nmea.length === 9) {
-            d = parseFloat(nmea.substring(0, 3)); // degrees
-            d += parseFloat(nmea.substring(3, 8)) / 60; // minutes
-            
-            // Last character is compass direction
-            if (nmea.toUpperCase().endsWith('W')) {
-                d = -d;
-            }
-            return d;
+        // Convert to decimal degrees
+        let result = degrees + (minutes / 60);
+        
+        // Apply direction
+        if (isNegative) {
+            result = -result;
         }
         
-        // Error
-        return 0;
+        return result;
     } catch (error) {
         return 0;
     }
