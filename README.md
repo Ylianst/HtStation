@@ -35,7 +35,7 @@ Here is a [Quick Setup Guide](docs/quicksetup.md) to get you up and running. At 
 - Install NodeJS and NPM on your Raspberry Pi.
 - Install Bluetooth dev libraries.
 - Pair the radio to the Raspberry Pi over Bluetooth.
-- Install HtStation using `npm install htstation`
+- Install [HtStation from NPM](https://www.npmjs.com/package/htstation) using `npm install htstation`
 - Setup your own config.ini.
 - Run in the background using `node htstation --install`
 
@@ -60,3 +60,4 @@ More extensive documentation is available here.
 ### Credits
 
 This tool is based on the decoding work done by Kyle Husmann, KC3SLD and this [BenLink](https://github.com/khusmann/benlink) project which decoded the Bluetooth commands for these radios.
+
