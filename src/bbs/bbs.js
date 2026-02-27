@@ -4,10 +4,14 @@
 const logger = global.logger ? global.logger.getLogger('BBS') : console;
 
 const EventEmitter = require('events');
-const AX25Session = require('./AX25Session');
-const AX25Packet = require('./AX25Packet');
-const Storage = require('./storage');
+const AX25Session = require('../AX25Session');
+const AX25Packet = require('../AX25Packet');
+const Storage = require('../storage');
 const os = require('os');
+const DataBroker = require('../utils/DataBroker');
+const DataBrokerClient = require('../utils/DataBrokerClient');
+const WinlinkGatewayRelay = require('../winlink/WinlinkGatewayRelay');
+const { WinlinkSecurity } = require('../winlink/winlink-utils');
 
 // Game modules
 const GuessTheNumberGame = require('./games-guess');
@@ -65,6 +69,51 @@ class BbsServer extends EventEmitter {
         this.fileTransfers = new Map(); // Map of session keys to YAPP transfer instances
         this.pubFilesPath = './pubfiles';
         this.initializeFileSystem();
+        
+        // === Winlink CMS Relay Management ===
+        this.cmsRelays = new Map(); // Map of session keys to WinlinkGatewayRelay instances
+        this.winlinkRelayEnabled = config.WINLINK_RELAY_ENABLED !== 'false'; // Enable by default
+        this.winlinkServer = config.WINLINK_SERVER || 'server.winlink.org';
+        this.winlinkPort = parseInt(config.WINLINK_PORT, 10) || 8773;
+        this.winlinkUseTls = config.WINLINK_USE_TLS !== 'false'; // Use TLS by default
+
+        // Data Broker client for receiving UniqueDataFrame events
+        this._broker = new DataBrokerClient();
+        this._broker.subscribe(DataBroker.AllDevices, 'UniqueDataFrame', this._onUniqueDataFrame.bind(this));
+    }
+
+    /**
+     * Handle UniqueDataFrame events from the Data Broker.
+     * This replaces the direct call from htstation.js
+     */
+    _onUniqueDataFrame(deviceId, name, frame) {
+        if (!frame || !frame.data) return;
+
+        // Attempt to decode AX.25 packet
+        const packet = AX25Packet.decodeAX25Packet(frame);
+        if (!packet) return;
+
+        // Skip APRS channel packets - those are handled by AprsHandler
+        if (packet.channel_name === 'APRS') return;
+
+        // Check if first address matches our station (BBS server)
+        if (packet.addresses && packet.addresses.length >= 1) {
+            const firstAddr = packet.addresses[0];
+            if (firstAddr.address === this.RADIO_CALLSIGN && firstAddr.SSID == this.RADIO_STATIONID) {
+                logger.log(`[BBS Server] Routing packet to BBS Server (${this.RADIO_CALLSIGN}-${this.RADIO_STATIONID})`);
+                this.processPacket(packet);
+            }
+        }
+    }
+
+    /**
+     * Dispose the handler, cleaning up broker subscriptions.
+     */
+    dispose() {
+        if (this._broker) {
+            this._broker.dispose();
+            this._broker = null;
+        }
     }
     
     // Initialize available games
@@ -1411,6 +1460,239 @@ class BbsServer extends EventEmitter {
         return `Invalid input. Please enter a file number or 'MAIN':\r\n`;
     }
     
+    // === Winlink CMS Gateway Relay Methods ===
+    
+    /**
+     * Attempts to connect to the Winlink CMS gateway for relay mode.
+     * If the connection succeeds, the BBS will relay Winlink protocol traffic
+     * between the radio station and the CMS gateway.
+     * @param {string} sessionKey - The session key for the connected station
+     * @param {string} stationCallsign - The callsign of the connected station
+     * @returns {Promise<{success: boolean, relay: WinlinkGatewayRelay|null, error?: string}>}
+     */
+    async attemptCmsRelayConnect(sessionKey, stationCallsign) {
+        if (!this.winlinkRelayEnabled) {
+            logger.log(`[BBS Relay] Winlink relay disabled by configuration`);
+            return { success: false, relay: null, error: 'Relay disabled' };
+        }
+        
+        try {
+            logger.log(`[BBS Relay] Attempting CMS relay connection for ${stationCallsign}`);
+            
+            const relay = new WinlinkGatewayRelay(
+                1, // deviceId - use 1 for BBS relay
+                this.winlinkServer,
+                this.winlinkPort,
+                this.winlinkUseTls
+            );
+            
+            const connected = await relay.connectAsync(stationCallsign, 15000);
+            
+            if (connected && relay.isConnected) {
+                logger.log(`[BBS Relay] CMS relay connected for ${stationCallsign}`);
+                logger.log(`[BBS Relay] WL2K Banner: ${relay.wl2kBanner || '(none)'}`);
+                logger.log(`[BBS Relay] PQ Challenge: ${relay.pqChallenge || '(none)'}`);
+                
+                // Store the relay
+                this.cmsRelays.set(sessionKey, relay);
+                
+                return { 
+                    success: true, 
+                    relay: relay,
+                    wl2kBanner: relay.wl2kBanner,
+                    pqChallenge: relay.pqChallenge
+                };
+            } else {
+                logger.log(`[BBS Relay] CMS relay failed to connect for ${stationCallsign}`);
+                relay.dispose();
+                return { success: false, relay: null, error: 'Connection failed' };
+            }
+        } catch (ex) {
+            logger.error(`[BBS Relay] CMS relay connect error for ${stationCallsign}: ${ex.message}`);
+            return { success: false, relay: null, error: ex.message };
+        }
+    }
+    
+    /**
+     * Sets up relay event handlers for forwarding data between radio and CMS gateway.
+     * @param {string} sessionKey - The session key
+     * @param {AX25Session} session - The AX25 session to the radio
+     * @param {WinlinkGatewayRelay} relay - The CMS relay instance
+     */
+    setupRelayHandlers(sessionKey, session, relay) {
+        // Handle line data from CMS gateway -> forward to radio
+        relay.on('line', (line) => {
+            if (!session || session.currentState !== AX25Session.ConnectionState.CONNECTED) return;
+            
+            logger.log(`[BBS Relay] CMS->Radio: ${line}`);
+            
+            // Monitor CMS-side protocol signals for binary mode switching
+            const key = line.toUpperCase();
+            let value = '';
+            const spaceIdx = line.indexOf(' ');
+            if (spaceIdx > 0) {
+                value = line.substring(spaceIdx + 1);
+            }
+            
+            // When CMS sends FS with accepted proposals, the radio station will send binary blocks
+            if (key.startsWith('FS') && value.toUpperCase().includes('Y')) {
+                session.sessionState = session.sessionState || {};
+                session.sessionState.wlRelayBinary = true;
+                relay.binaryMode = true;
+            }
+            
+            // When CMS sends FF or FQ, go back to text mode
+            if (key.startsWith('FF') || key.startsWith('FQ')) {
+                session.sessionState = session.sessionState || {};
+                session.sessionState.wlRelayBinary = false;
+                relay.binaryMode = false;
+            }
+            
+            session.send(Buffer.from(line + '\r'), true);
+        });
+        
+        // Handle binary data from CMS gateway -> forward to radio
+        relay.on('binaryData', (data) => {
+            if (!session || session.currentState !== AX25Session.ConnectionState.CONNECTED) return;
+            
+            logger.log(`[BBS Relay] CMS->Radio: ${data.length} binary bytes`);
+            session.send(data, true);
+        });
+        
+        // Handle CMS relay disconnection
+        relay.on('disconnected', () => {
+            logger.log(`[BBS Relay] CMS relay disconnected for ${sessionKey}`);
+            this.cmsRelays.delete(sessionKey);
+            
+            // If the radio session is still connected, disconnect it
+            if (session && session.currentState === AX25Session.ConnectionState.CONNECTED) {
+                session.disconnect();
+            }
+        });
+    }
+    
+    /**
+     * Process Winlink mail stream data in relay mode.
+     * All data is forwarded to the CMS gateway.
+     * @param {string} sessionKey - The session key
+     * @param {AX25Session} session - The AX25 session
+     * @param {Buffer} data - The received data
+     */
+    processMailStreamRelay(sessionKey, session, data) {
+        const relay = this.cmsRelays.get(sessionKey);
+        if (!relay || !relay.isConnected) {
+            logger.log(`[BBS Relay] No active relay for ${sessionKey}`);
+            return;
+        }
+        
+        session.sessionState = session.sessionState || {};
+        
+        // If we're in binary relay mode, forward raw bytes to CMS
+        if (session.sessionState.wlRelayBinary) {
+            logger.log(`[BBS Relay] Radio->CMS (binary): ${data.length} bytes`);
+            relay.sendBinary(data);
+            return;
+        }
+        
+        // Text mode: parse lines and forward to CMS
+        const dataStr = data.toString('utf8');
+        const lines = dataStr.replace(/\r\n/g, '\r').replace(/\n/g, '\r').split('\r');
+        
+        for (const line of lines) {
+            if (line.length === 0) continue;
+            
+            logger.log(`[BBS Relay] Radio->CMS: ${line}`);
+            
+            const key = line.toUpperCase();
+            let value = '';
+            const spaceIdx = line.indexOf(' ');
+            if (spaceIdx > 0) {
+                value = line.substring(spaceIdx + 1);
+            }
+            
+            // Detect FS response that accepts mail proposals
+            if (key.startsWith('FS') && value.toUpperCase().includes('Y')) {
+                session.sessionState.wlRelayBinary = true;
+                relay.binaryMode = true;
+            }
+            
+            // Detect FF — switch back from binary mode
+            if (key.startsWith('FF')) {
+                session.sessionState.wlRelayBinary = false;
+                relay.binaryMode = false;
+            }
+            
+            // Detect FQ — session close
+            if (key.startsWith('FQ')) {
+                session.sessionState.wlRelayBinary = false;
+                relay.binaryMode = false;
+            }
+            
+            // Forward the line to CMS
+            relay.sendLine(line);
+        }
+    }
+    
+    /**
+     * Cleans up the CMS relay connection for a session.
+     * @param {string} sessionKey - The session key
+     */
+    cleanupCmsRelay(sessionKey) {
+        const relay = this.cmsRelays.get(sessionKey);
+        if (relay) {
+            try {
+                relay.disconnect();
+                relay.dispose();
+            } catch (ex) {
+                // Ignore cleanup errors
+            }
+            this.cmsRelays.delete(sessionKey);
+            logger.log(`[BBS Relay] Cleaned up CMS relay for ${sessionKey}`);
+        }
+    }
+    
+    /**
+     * Generates a Winlink banner with relay or local mode information.
+     * @param {string} sessionKey - The session key
+     * @param {WinlinkGatewayRelay|null} relay - The relay if connected, or null for local mode
+     * @returns {string} The banner message to send to the radio station
+     */
+    generateWinlinkBanner(sessionKey, relay = null) {
+        let banner = `Handi-Talky Station BBS\r\n[M] for menu\r\n`;
+        
+        if (relay && relay.isConnected) {
+            // Use the CMS gateway's WL2K banner if available
+            if (relay.wl2kBanner) {
+                banner += relay.wl2kBanner + '\r\n';
+            } else {
+                banner += '[WL2K-5.0-B2FWIHJM$]\r\n';
+            }
+            
+            // Use the CMS gateway's PQ challenge if available
+            if (relay.pqChallenge) {
+                banner += `;PQ: ${relay.pqChallenge}\r\n`;
+            }
+        } else {
+            // Local mode - generate our own challenge
+            banner += '[WL2K-5.0-B2FWIHJM$]\r\n';
+            const challenge = WinlinkSecurity.generateChallenge();
+            
+            // Store the challenge in session state for later verification
+            const session = this.activeSessions.get(sessionKey);
+            if (session) {
+                session.sessionState = session.sessionState || {};
+                session.sessionState.wlChallenge = challenge;
+            }
+            
+            if (this.config.WINLINK_PASSWORD) {
+                banner += `;PQ: ${challenge}\r\n`;
+            }
+        }
+        
+        banner += '>\r\n';
+        return banner;
+    }
+    
     // Cleanup method for proper shutdown
     close() {
         try {
@@ -1420,6 +1702,13 @@ class BbsServer extends EventEmitter {
                 transfer.cancel('BBS shutting down');
             }
             this.fileTransfers.clear();
+            
+            // Cleanup all CMS relays
+            for (const [sessionKey, relay] of this.cmsRelays) {
+                logger.log(`[BBS Server] Cleaning up CMS relay for ${sessionKey}`);
+                this.cleanupCmsRelay(sessionKey);
+            }
+            this.cmsRelays.clear();
             
             // Close all active sessions
             for (const [sessionKey, session] of this.activeSessions) {

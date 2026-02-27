@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>APRS Messages - HtStation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e0e0e0;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 15px;
+        }
+        
+        h1 {
+            font-size: 20px;
+            font-weight: 600;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        h1 .icon {
+            font-size: 24px;
+        }
+        
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .home-link {
+            color: #3498db;
+            text-decoration: none;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .home-link:hover {
+            text-decoration: underline;
+        }
+        
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-weight: 500;
+            font-size: 12px;
+        }
+        
+        .connection-status.connected {
+            background: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+            border: 1px solid rgba(46, 204, 113, 0.3);
+        }
+        
+        .connection-status.disconnected {
+            background: rgba(231, 76, 60, 0.2);
+            color: #e74c3c;
+            border: 1px solid rgba(231, 76, 60, 0.3);
+        }
+        
+        .connection-status.connecting {
+            background: rgba(241, 196, 15, 0.2);
+            color: #f1c40f;
+            border: 1px solid rgba(241, 196, 15, 0.3);
+        }
+        
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+        
+        .connected .status-dot {
+            background: #2ecc71;
+            box-shadow: 0 0 10px #2ecc71;
+        }
+        
+        .disconnected .status-dot {
+            background: #e74c3c;
+        }
+        
+        .connecting .status-dot {
+            background: #f1c40f;
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .stats-bar {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .stat-item {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .stat-icon {
+            font-size: 24px;
+        }
+        
+        .stat-info {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .stat-value {
+            font-size: 20px;
+            font-weight: 600;
+            color: #3498db;
+        }
+        
+        .stat-label {
+            font-size: 11px;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .filter-bar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .filter-bar input[type="text"] {
+            flex: 1;
+            min-width: 200px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #fff;
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 14px;
+            outline: none;
+        }
+        
+        .filter-bar input[type="text"]:focus {
+            border-color: #3498db;
+        }
+        
+        .filter-bar select {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #fff;
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 14px;
+            outline: none;
+            cursor: pointer;
+        }
+        
+        .filter-bar button {
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            transition: all 0.2s;
+        }
+        
+        .filter-bar button:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+        
+        .messages-container {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        
+        .messages-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .messages-header h2 {
+            font-size: 16px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .live-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: #2ecc71;
+            background: rgba(46, 204, 113, 0.1);
+            padding: 4px 10px;
+            border-radius: 20px;
+        }
+        
+        .live-indicator .dot {
+            width: 6px;
+            height: 6px;
+            background: #2ecc71;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+        
+        .checkbox-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .checkbox-wrapper label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        
+        .checkbox-wrapper input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+        }
+        
+        .messages-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .messages-table th {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 12px 15px;
+            text-align: left;
+            font-size: 12px;
+            font-weight: 600;
+            color: #aaa;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            position: sticky;
+            top: 0;
+        }
+        
+        .messages-table td {
+            padding: 12px 15px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            font-size: 13px;
+            vertical-align: top;
+        }
+        
+        .messages-table tr:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+        
+        .messages-table tr.new-message {
+            animation: highlight 2s ease-out;
+        }
+        
+        @keyframes highlight {
+            0% { background: rgba(52, 152, 219, 0.3); }
+            100% { background: transparent; }
+        }
+        
+        .messages-scroll {
+            max-height: calc(100vh - 320px);
+            overflow-y: auto;
+        }
+        
+        .messages-scroll::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .messages-scroll::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+        }
+        
+        .messages-scroll::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+        }
+        
+        .messages-scroll::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+        
+        .callsign {
+            font-weight: 600;
+            color: #3498db;
+        }
+        
+        .callsign.sent {
+            color: #2ecc71;
+        }
+        
+        .data-type {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        
+        .data-type.Message { background: rgba(52, 152, 219, 0.2); color: #3498db; }
+        .data-type.Position { background: rgba(155, 89, 182, 0.2); color: #9b59b6; }
+        .data-type.PositionMsg { background: rgba(155, 89, 182, 0.2); color: #9b59b6; }
+        .data-type.Weather { background: rgba(46, 204, 113, 0.2); color: #2ecc71; }
+        .data-type.Status { background: rgba(241, 196, 15, 0.2); color: #f1c40f; }
+        .data-type.Telemetry { background: rgba(230, 126, 34, 0.2); color: #e67e22; }
+        .data-type.Object { background: rgba(231, 76, 60, 0.2); color: #e74c3c; }
+        .data-type.Item { background: rgba(231, 76, 60, 0.2); color: #e74c3c; }
+        
+        .direction {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        
+        .direction.received { background: rgba(52, 152, 219, 0.2); color: #3498db; }
+        .direction.sent { background: rgba(46, 204, 113, 0.2); color: #2ecc71; }
+        
+        .message-content {
+            max-width: 400px;
+            word-break: break-word;
+        }
+        
+        .position-info {
+            font-size: 11px;
+            color: #888;
+            margin-top: 4px;
+        }
+        
+        .position-info a {
+            color: #3498db;
+            text-decoration: none;
+        }
+        
+        .position-info a:hover {
+            text-decoration: underline;
+        }
+        
+        .timestamp {
+            white-space: nowrap;
+            color: #888;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+        
+        .empty-state .icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+            opacity: 0.5;
+        }
+        
+        .empty-state p {
+            font-size: 14px;
+        }
+        
+        .loading-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #888;
+        }
+        
+        .loading-state .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top-color: #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        @media (max-width: 768px) {
+            header {
+                flex-direction: column;
+                gap: 15px;
+                text-align: center;
+            }
+            
+            .stats-bar {
+                justify-content: center;
+            }
+            
+            .filter-bar {
+                flex-direction: column;
+            }
+            
+            .filter-bar input[type="text"] {
+                min-width: 100%;
+            }
+            
+            .messages-table th,
+            .messages-table td {
+                padding: 8px 10px;
+            }
+            
+            .messages-table .hide-mobile {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>
+                <span class="icon">📡</span>
+                APRS Messages
+            </h1>
+            <div class="header-controls">
+                <a href="index.html" class="home-link">🏠 Home</a>
+                <div id="connectionStatus" class="connection-status disconnected">
+                    <span class="status-dot"></span>
+                    <span id="statusText">Disconnected</span>
+                </div>
+            </div>
+        </header>
+        
+        <div class="stats-bar">
+            <div class="stat-item">
+                <span class="stat-icon">📨</span>
+                <div class="stat-info">
+                    <span id="totalMessages" class="stat-value">0</span>
+                    <span class="stat-label">Total Messages</span>
+                </div>
+            </div>
+            <div class="stat-item">
+                <span class="stat-icon">📍</span>
+                <div class="stat-info">
+                    <span id="positionPackets" class="stat-value">0</span>
+                    <span class="stat-label">Position Reports</span>
+                </div>
+            </div>
+            <div class="stat-item">
+                <span class="stat-icon">🌤️</span>
+                <div class="stat-info">
+                    <span id="weatherPackets" class="stat-value">0</span>
+                    <span class="stat-label">Weather Reports</span>
+                </div>
+            </div>
+            <div class="stat-item">
+                <span class="stat-icon">📻</span>
+                <div class="stat-info">
+                    <span id="uniqueStations" class="stat-value">0</span>
+                    <span class="stat-label">Unique Stations</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="filter-bar">
+            <input type="text" id="filterText" placeholder="🔍 Filter by callsign or message content...">
+            <select id="filterType">
+                <option value="">All Types</option>
+                <option value="Message">Messages</option>
+                <option value="Position">Position</option>
+                <option value="Weather">Weather</option>
+                <option value="Status">Status</option>
+                <option value="Telemetry">Telemetry</option>
+                <option value="Object">Object</option>
+            </select>
+            <select id="filterDirection">
+                <option value="">All Directions</option>
+                <option value="received">Received</option>
+                <option value="sent">Sent</option>
+            </select>
+            <button id="clearFilter">Clear Filters</button>
+        </div>
+        
+        <div class="messages-container">
+            <div class="messages-header">
+                <h2>
+                    📋 Message History
+                    <span class="live-indicator">
+                        <span class="dot"></span>
+                        LIVE
+                    </span>
+                </h2>
+                <div class="checkbox-wrapper">
+                    <label>
+                        <input type="checkbox" id="autoscroll" checked>
+                        Auto-scroll
+                    </label>
+                    <label>
+                        <input type="checkbox" id="showRaw">
+                        Show Raw
+                    </label>
+                </div>
+            </div>
+            
+            <div class="messages-scroll" id="messagesScroll">
+                <div id="loadingState" class="loading-state">
+                    <div class="spinner"></div>
+                    <p>Connecting to APRS service...</p>
+                </div>
+                
+                <table class="messages-table" id="messagesTable" style="display: none;">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>From</th>
+                            <th>To</th>
+                            <th>Type</th>
+                            <th class="hide-mobile">Dir</th>
+                            <th>Content</th>
+                        </tr>
+                    </thead>
+                    <tbody id="messagesBody">
+                    </tbody>
+                </table>
+                
+                <div id="emptyState" class="empty-state" style="display: none;">
+                    <div class="icon">📭</div>
+                    <p>No APRS messages yet. Waiting for traffic...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let ws = null;
+        let messages = [];
+        let uniqueStations = new Set();
+        let positionCount = 0;
+        let weatherCount = 0;
+        let isStoreReady = false;
+        let subscriptionsReady = 0;
+        let loadTimeout = null;
+        let hasReceivedPackets = false;
+        
+        // DOM Elements
+        const connectionStatus = document.getElementById('connectionStatus');
+        const statusText = document.getElementById('statusText');
+        const loadingState = document.getElementById('loadingState');
+        const emptyState = document.getElementById('emptyState');
+        const messagesTable = document.getElementById('messagesTable');
+        const messagesBody = document.getElementById('messagesBody');
+        const messagesScroll = document.getElementById('messagesScroll');
+        const totalMessagesEl = document.getElementById('totalMessages');
+        const positionPacketsEl = document.getElementById('positionPackets');
+        const weatherPacketsEl = document.getElementById('weatherPackets');
+        const uniqueStationsEl = document.getElementById('uniqueStations');
+        const filterText = document.getElementById('filterText');
+        const filterType = document.getElementById('filterType');
+        const filterDirection = document.getElementById('filterDirection');
+        const clearFilterBtn = document.getElementById('clearFilter');
+        const autoscrollCheck = document.getElementById('autoscroll');
+        const showRawCheck = document.getElementById('showRaw');
+        
+        // Connect to WebSocket
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/messagebus`;
+            
+            updateConnectionStatus('connecting');
+            subscriptionsReady = 0;
+            hasReceivedPackets = false;
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                updateConnectionStatus('connected');
+                
+                // Subscribe to APRS events after a brief delay
+                setTimeout(() => {
+                    // Subscribe to new APRS frames
+                    subscribe(1, 'AprsFrame');
+                    
+                    // Subscribe to store ready event
+                    subscribe(1, 'AprsStoreReady');
+                    
+                    // Subscribe to packet list response
+                    subscribe(1, 'AprsPacketList');
+                }, 100);
+                
+                // Set a timeout to show empty state if no packets received
+                loadTimeout = setTimeout(() => {
+                    if (!hasReceivedPackets) {
+                        loadingState.style.display = 'none';
+                        emptyState.style.display = 'block';
+                    }
+                }, 5000);
+            };
+            
+            ws.onclose = () => {
+                updateConnectionStatus('disconnected');
+                isStoreReady = false;
+                subscriptionsReady = 0;
+                if (loadTimeout) {
+                    clearTimeout(loadTimeout);
+                    loadTimeout = null;
+                }
+                // Reconnect after 3 seconds
+                setTimeout(connect, 3000);
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleMessage(data);
+                } catch (error) {
+                    console.error('Failed to parse message:', error);
+                }
+            };
+        }
+        
+        function updateConnectionStatus(status) {
+            connectionStatus.className = 'connection-status ' + status;
+            statusText.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+        }
+        
+        function subscribe(deviceId, name) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            
+            ws.send(JSON.stringify({
+                action: 'subscribe',
+                deviceId: deviceId,
+                name: name
+            }));
+        }
+        
+        function requestAprsPackets() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            
+            // Dispatch request for APRS packets via DataBroker
+            ws.send(JSON.stringify({
+                action: 'dispatch',
+                deviceId: 1,
+                name: 'RequestAprsPackets',
+                data: null
+            }));
+        }
+        
+        function handleMessage(data) {
+            switch (data.type) {
+                case 'welcome':
+                    console.log('Connected to MessageBus', data);
+                    break;
+                    
+                case 'message':
+                    if (data.name === 'AprsFrame') {
+                        addAprsFrame(data.data, true);
+                    } else if (data.name === 'AprsPacketList') {
+                        loadHistoricalPackets(data.data);
+                    } else if (data.name === 'AprsStoreReady') {
+                        isStoreReady = true;
+                        requestAprsPackets();
+                    }
+                    break;
+                    
+                case 'subscribeResult':
+                    console.log('Subscribed to:', data.name, data.success);
+                    if (data.success) {
+                        subscriptionsReady++;
+                        // Once all 3 subscriptions are ready, request packets
+                        if (subscriptionsReady >= 3) {
+                            console.log('All subscriptions ready, requesting APRS packets');
+                            requestAprsPackets();
+                        }
+                    }
+                    break;
+                    
+                case 'dispatchResult':
+                    console.log('Dispatch result:', data.name, data.success);
+                    break;
+            }
+        }
+        
+        function loadHistoricalPackets(packets) {
+            if (!Array.isArray(packets)) return;
+            
+            console.log(`Loading ${packets.length} historical APRS packets`);
+            
+            // Clear existing messages
+            messages = [];
+            uniqueStations.clear();
+            positionCount = 0;
+            weatherCount = 0;
+            
+            // Add all historical packets
+            packets.forEach(packet => {
+                addAprsFrame(packet, false);
+            });
+            
+            // Hide loading, show table
+            loadingState.style.display = 'none';
+            
+            if (messages.length > 0) {
+                messagesTable.style.display = 'table';
+                emptyState.style.display = 'none';
+            } else {
+                messagesTable.style.display = 'none';
+                emptyState.style.display = 'block';
+            }
+            
+            renderMessages();
+        }
+        
+        function addAprsFrame(frameData, isNew) {
+            if (!frameData) return;
+            
+            const aprsPacket = frameData.aprsPacket;
+            const ax25Packet = frameData.ax25Packet;
+            
+            if (!aprsPacket) return;
+            
+            // Extract source callsign
+            let sourceCallsign = 'Unknown';
+            if (ax25Packet && ax25Packet.addresses && ax25Packet.addresses.length > 1) {
+                const src = ax25Packet.addresses[1];
+                sourceCallsign = src.address + (src.SSID > 0 ? `-${src.SSID}` : '');
+            }
+            
+            // Extract destination
+            let destinationCallsign = '';
+            if (aprsPacket.messageData && aprsPacket.messageData.addressee) {
+                destinationCallsign = aprsPacket.messageData.addressee.trim();
+            } else if (aprsPacket.dataType) {
+                destinationCallsign = `APRS-${aprsPacket.dataType.toUpperCase()}`;
+            }
+            
+            // Extract content
+            let content = '';
+            let position = null;
+            
+            switch (aprsPacket.dataType) {
+                case 'Message':
+                    content = aprsPacket.messageData ? aprsPacket.messageData.msgText || '' : '';
+                    break;
+                case 'Position':
+                case 'PositionMsg':
+                case 'PositionTime':
+                case 'PositionTimeMsg':
+                    if (aprsPacket.position && aprsPacket.position.coordinateSet) {
+                        const lat = aprsPacket.position.coordinateSet.latitude?.value;
+                        const lon = aprsPacket.position.coordinateSet.longitude?.value;
+                        if (lat !== undefined && lon !== undefined) {
+                            position = { lat, lon };
+                            content = `Lat: ${lat.toFixed(6)}, Lon: ${lon.toFixed(6)}`;
+                        }
+                    }
+                    if (aprsPacket.comment) {
+                        content += (content ? ' - ' : '') + aprsPacket.comment;
+                    }
+                    positionCount++;
+                    break;
+                case 'Weather':
+                    if (aprsPacket.weather) {
+                        const w = aprsPacket.weather;
+                        content = `Temp: ${w.temperature || 'N/A'}°F, Wind: ${w.windSpeed || 'N/A'}mph @ ${w.windDirection || 'N/A'}°`;
+                    }
+                    weatherCount++;
+                    break;
+                case 'Status':
+                    content = aprsPacket.status || ax25Packet?.dataStr || '';
+                    break;
+                default:
+                    content = ax25Packet?.dataStr || aprsPacket.dataType || '';
+            }
+            
+            // Determine direction (sent vs received)
+            const direction = ax25Packet?.incoming === false ? 'sent' : 'received';
+            
+            // Track unique stations
+            uniqueStations.add(sourceCallsign);
+            
+            const messageItem = {
+                id: Date.now() + Math.random(),
+                timestamp: frameData.timestamp || Date.now(),
+                source: sourceCallsign,
+                destination: destinationCallsign,
+                dataType: aprsPacket.dataType || 'Unknown',
+                content: content,
+                direction: direction,
+                position: position,
+                raw: ax25Packet?.dataStr || '',
+                isNew: isNew
+            };
+            
+            // Add to beginning for newest first
+            messages.unshift(messageItem);
+            
+            // Limit to 1000 messages
+            if (messages.length > 1000) {
+                messages.pop();
+            }
+            
+            updateStats();
+            
+            if (isNew) {
+                // Show table if hidden
+                loadingState.style.display = 'none';
+                messagesTable.style.display = 'table';
+                emptyState.style.display = 'none';
+                
+                renderMessages();
+            }
+        }
+        
+        function updateStats() {
+            totalMessagesEl.textContent = messages.length.toLocaleString();
+            positionPacketsEl.textContent = positionCount.toLocaleString();
+            weatherPacketsEl.textContent = weatherCount.toLocaleString();
+            uniqueStationsEl.textContent = uniqueStations.size.toLocaleString();
+        }
+        
+        function renderMessages() {
+            const filter = filterText.value.toLowerCase();
+            const typeFilter = filterType.value;
+            const directionFilter = filterDirection.value;
+            const showRaw = showRawCheck.checked;
+            
+            const filtered = messages.filter(msg => {
+                if (typeFilter && !msg.dataType.startsWith(typeFilter)) return false;
+                if (directionFilter && msg.direction !== directionFilter) return false;
+                if (filter) {
+                    const searchStr = `${msg.source} ${msg.destination} ${msg.content}`.toLowerCase();
+                    if (!searchStr.includes(filter)) return false;
+                }
+                return true;
+            });
+            
+            if (filtered.length === 0) {
+                messagesBody.innerHTML = '';
+                if (messages.length === 0) {
+                    messagesTable.style.display = 'none';
+                    emptyState.style.display = 'block';
+                }
+                return;
+            }
+            
+            messagesTable.style.display = 'table';
+            emptyState.style.display = 'none';
+            
+            messagesBody.innerHTML = filtered.slice(0, 500).map(msg => {
+                const time = formatTime(msg.timestamp);
+                const isNewClass = msg.isNew ? 'new-message' : '';
+                msg.isNew = false; // Only animate once
+                
+                let contentHtml = escapeHtml(msg.content);
+                
+                // Add position link if available
+                if (msg.position) {
+                    const mapUrl = `https://www.google.com/maps?q=${msg.position.lat},${msg.position.lon}`;
+                    contentHtml += `<div class="position-info"><a href="${mapUrl}" target="_blank">📍 View on Map</a></div>`;
+                }
+                
+                // Show raw data if enabled
+                if (showRaw && msg.raw) {
+                    contentHtml += `<div class="position-info" style="font-family: monospace; margin-top: 8px;">Raw: ${escapeHtml(msg.raw)}</div>`;
+                }
+                
+                return `
+                    <tr class="${isNewClass}">
+                        <td class="timestamp">${time}</td>
+                        <td><span class="callsign ${msg.direction}">${escapeHtml(msg.source)}</span></td>
+                        <td>${escapeHtml(msg.destination)}</td>
+                        <td><span class="data-type ${msg.dataType}">${msg.dataType}</span></td>
+                        <td class="hide-mobile"><span class="direction ${msg.direction}">${msg.direction === 'sent' ? '📤' : '📥'} ${msg.direction}</span></td>
+                        <td class="message-content">${contentHtml}</td>
+                    </tr>
+                `;
+            }).join('');
+            
+            // Auto-scroll to top for newest messages
+            if (autoscrollCheck.checked) {
+                messagesScroll.scrollTop = 0;
+            }
+        }
+        
+        function formatTime(timestamp) {
+            const date = new Date(timestamp);
+            return date.toLocaleTimeString('en-US', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: false
+            });
+        }
+        
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Event Listeners
+        filterText.addEventListener('input', renderMessages);
+        filterType.addEventListener('change', renderMessages);
+        filterDirection.addEventListener('change', renderMessages);
+        showRawCheck.addEventListener('change', renderMessages);
+        
+        clearFilterBtn.addEventListener('click', () => {
+            filterText.value = '';
+            filterType.value = '';
+            filterDirection.value = '';
+            renderMessages();
+        });
+        
+        // Initialize
+        connect();
+    </script>
+</body>
+</html>

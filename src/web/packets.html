@@ -1,0 +1,1473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Packet Capture</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e0e0e0;
+        }
+        
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 15px;
+        }
+        
+        h1 {
+            font-size: 20px;
+            font-weight: 600;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        h1 .icon {
+            font-size: 24px;
+        }
+        
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-weight: 500;
+            font-size: 12px;
+        }
+        
+        .connection-status.connected {
+            background: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+            border: 1px solid rgba(46, 204, 113, 0.3);
+        }
+        
+        .connection-status.disconnected {
+            background: rgba(231, 76, 60, 0.2);
+            color: #e74c3c;
+            border: 1px solid rgba(231, 76, 60, 0.3);
+        }
+        
+        .connection-status.connecting {
+            background: rgba(241, 196, 15, 0.2);
+            color: #f1c40f;
+            border: 1px solid rgba(241, 196, 15, 0.3);
+        }
+        
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+        
+        .connected .status-dot {
+            background: #2ecc71;
+            box-shadow: 0 0 10px #2ecc71;
+        }
+        
+        .disconnected .status-dot {
+            background: #e74c3c;
+        }
+        
+        .connecting .status-dot {
+            background: #f1c40f;
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .compact-stats {
+            display: flex;
+            gap: 15px;
+            font-size: 12px;
+            color: #888;
+        }
+        
+        .compact-stats span {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .compact-stats .value {
+            color: #3498db;
+            font-weight: 600;
+        }
+        
+        .main-content {
+            display: flex;
+            gap: 15px;
+            height: calc(100vh - 120px);
+        }
+        
+        .packets-panel {
+            flex: 1;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .decode-panel {
+            width: 400px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .decode-panel.hidden {
+            display: none;
+        }
+        
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .panel-header h2 {
+            font-size: 14px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .panel-header .live-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: #2ecc71;
+            background: rgba(46, 204, 113, 0.1);
+            padding: 3px 8px;
+            border-radius: 20px;
+        }
+        
+        .panel-header .live-indicator .dot {
+            width: 6px;
+            height: 6px;
+            background: #2ecc71;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+        
+        .filter-bar {
+            display: flex;
+            gap: 10px;
+            padding: 10px 16px;
+            background: rgba(255, 255, 255, 0.02);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        
+        .filter-bar input, .filter-bar select {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #fff;
+            padding: 6px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            outline: none;
+        }
+        
+        .filter-bar input {
+            flex: 1;
+        }
+        
+        .filter-bar input:focus, .filter-bar select:focus {
+            border-color: #3498db;
+        }
+        
+        .checkbox-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: #aaa;
+        }
+        
+        .checkbox-wrapper input[type="checkbox"] {
+            width: 14px;
+            height: 14px;
+            cursor: pointer;
+        }
+        
+        button {
+            padding: 6px 12px;
+            border-radius: 5px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+        }
+        
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+        
+        .packets-table-container {
+            flex: 1;
+            overflow-y: auto;
+        }
+        
+        .packets-table-container::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .packets-table-container::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+        }
+        
+        .packets-table-container::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+        }
+        
+        .packets-table-container::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        thead {
+            position: sticky;
+            top: 0;
+            background: rgba(30, 30, 50, 0.95);
+            z-index: 10;
+        }
+        
+        th {
+            text-align: left;
+            padding: 10px 12px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            cursor: pointer;
+            user-select: none;
+        }
+        
+        th:hover {
+            color: #aaa;
+        }
+        
+        th.sorted-asc::after {
+            content: ' ▲';
+            font-size: 10px;
+        }
+        
+        th.sorted-desc::after {
+            content: ' ▼';
+            font-size: 10px;
+        }
+        
+        td {
+            padding: 10px 12px;
+            font-size: 13px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            max-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        tr {
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        
+        tr:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+        
+        tr.selected {
+            background: rgba(52, 152, 219, 0.15);
+        }
+        
+        .direction-icon {
+            font-size: 18px;
+            font-weight: bold;
+            width: 24px;
+            display: inline-block;
+            text-align: center;
+        }
+        
+        .direction-in {
+            color: #2ecc71;
+        }
+        
+        .direction-out {
+            color: #3498db;
+        }
+        
+        .channel-badge {
+            background: rgba(155, 89, 182, 0.2);
+            color: #9b59b6;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+        
+        .empty-state .icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+            opacity: 0.5;
+        }
+        
+        .empty-state p {
+            font-size: 14px;
+        }
+        
+        .decode-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0;
+        }
+        
+        .decode-content::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .decode-content::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+        }
+        
+        .decode-content::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+        }
+        
+        .decode-section {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .decode-section-header {
+            padding: 10px 14px;
+            background: rgba(255, 255, 255, 0.03);
+            font-size: 12px;
+            font-weight: 600;
+            color: #3498db;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .decode-section-content {
+            padding: 8px 0;
+        }
+        
+        .decode-row {
+            display: flex;
+            padding: 6px 14px;
+            font-size: 12px;
+        }
+        
+        .decode-row:hover {
+            background: rgba(255, 255, 255, 0.02);
+        }
+        
+        .decode-label {
+            width: 100px;
+            flex-shrink: 0;
+            color: #888;
+        }
+        
+        .decode-value {
+            flex: 1;
+            color: #e0e0e0;
+            word-break: break-all;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        }
+        
+        .decode-value.hex {
+            color: #98c379;
+        }
+        
+        .decode-placeholder {
+            padding: 40px 20px;
+            text-align: center;
+            color: #666;
+            font-size: 13px;
+        }
+        
+        @media (max-width: 1200px) {
+            .decode-panel {
+                width: 350px;
+            }
+        }
+        
+        @media (max-width: 900px) {
+            .main-content {
+                flex-direction: column;
+                height: auto;
+            }
+            
+            .packets-panel {
+                height: 50vh;
+            }
+            
+            .decode-panel {
+                width: 100%;
+                height: 40vh;
+            }
+            
+            .decode-panel.hidden {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>
+                <span class="icon">📦</span>
+                Packet Capture
+            </h1>
+            <div class="header-controls">
+                <a href="index.html" style="color: #3498db; text-decoration: none; font-size: 14px;">🏠 Home</a>
+                <div class="compact-stats">
+                    <span>Packets: <span id="packetCount" class="value">0</span></span>
+                    <span>Rate: <span id="packetsPerSec" class="value">0</span>/s</span>
+                </div>
+                <div id="connectionStatus" class="connection-status disconnected">
+                    <span class="status-dot"></span>
+                    <span id="statusText">Disconnected</span>
+                </div>
+            </div>
+        </header>
+        
+        <div class="main-content">
+            <div class="packets-panel">
+                <div class="panel-header">
+                    <h2>
+                        📡 Captured Packets
+                        <span class="live-indicator">
+                            <span class="dot"></span>
+                            LIVE
+                        </span>
+                    </h2>
+                    <button id="clearBtn" class="btn-secondary">Clear</button>
+                </div>
+                
+                <div class="filter-bar">
+                    <input type="text" id="filterText" placeholder="Filter packets...">
+                    <select id="filterChannel">
+                        <option value="">All Channels</option>
+                    </select>
+                    <div class="checkbox-wrapper">
+                        <input type="checkbox" id="autoscroll" checked>
+                        <label for="autoscroll">Auto-scroll</label>
+                    </div>
+                    <div class="checkbox-wrapper">
+                        <input type="checkbox" id="showDecode" checked>
+                        <label for="showDecode">Decode Panel</label>
+                    </div>
+                </div>
+                
+                <div class="packets-table-container">
+                    <table id="packetsTable">
+                        <thead>
+                            <tr>
+                                <th style="width: 30px;"></th>
+                                <th id="sortTime" class="sorted-desc" style="width: 80px;">Time</th>
+                                <th id="sortChannel" style="width: 100px;">Channel</th>
+                                <th id="sortData">Data</th>
+                            </tr>
+                        </thead>
+                        <tbody id="packetsBody">
+                        </tbody>
+                    </table>
+                    <div id="emptyState" class="empty-state">
+                        <div class="icon">📭</div>
+                        <p>No packets captured yet. Waiting for data...</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="decodePanel" class="decode-panel">
+                <div class="panel-header">
+                    <h2>🔍 Packet Decode</h2>
+                </div>
+                <div id="decodeContent" class="decode-content">
+                    <div class="decode-placeholder">
+                        Select a packet to view decoded information
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // =============================================================================
+        // Packet Decoder Classes (Browser-side ports of BSSPacket, AX25Packet, etc.)
+        // =============================================================================
+        
+        /**
+         * BSSPacket decoder - Binary Short Serialization protocol
+         */
+        const BSSPacket = {
+            FieldType: {
+                Callsign: 0x20,
+                Destination: 0x21,
+                Message: 0x24,
+                Location: 0x25,
+                LocationRequest: 0x27,
+                CallRequest: 0x28
+            },
+            
+            isBSSPacket(data) {
+                return data && data.length >= 2 && data[0] === 0x01;
+            },
+            
+            decode(data) {
+                if (!this.isBSSPacket(data)) return null;
+                
+                const packet = {
+                    callsign: null,
+                    destination: null,
+                    message: null,
+                    location: null,
+                    locationRequest: null,
+                    callRequest: null,
+                    messageID: 0,
+                    rawFields: new Map()
+                };
+                
+                let index = 1;
+                
+                while (index < data.length) {
+                    if (index + 1 >= data.length) break;
+                    
+                    const length = data[index];
+                    
+                    // MessageID marker
+                    if (length === 0x85) {
+                        if (index + 3 > data.length) break;
+                        packet.messageID = (data[index + 1] << 8) | data[index + 2];
+                        index += 3;
+                        continue;
+                    }
+                    
+                    const fieldType = data[index + 1];
+                    if (length < 1) break;
+                    
+                    const valueLen = length - 1;
+                    if (index + 2 + valueLen > data.length) break;
+                    
+                    const value = data.slice(index + 2, index + 2 + valueLen);
+                    packet.rawFields.set(fieldType, value);
+                    
+                    // Parse known fields
+                    const decoder = new TextDecoder();
+                    switch (fieldType) {
+                        case this.FieldType.Callsign:
+                            packet.callsign = decoder.decode(new Uint8Array(value));
+                            break;
+                        case this.FieldType.Destination:
+                            packet.destination = decoder.decode(new Uint8Array(value));
+                            break;
+                        case this.FieldType.Message:
+                            packet.message = decoder.decode(new Uint8Array(value));
+                            break;
+                        case this.FieldType.Location:
+                            packet.location = this.decodeLocation(value);
+                            break;
+                        case this.FieldType.LocationRequest:
+                            packet.locationRequest = decoder.decode(new Uint8Array(value));
+                            break;
+                        case this.FieldType.CallRequest:
+                            packet.callRequest = decoder.decode(new Uint8Array(value));
+                            break;
+                    }
+                    
+                    index += 2 + valueLen;
+                }
+                
+                return packet;
+            },
+            
+            decodeLocation(bytes) {
+                if (!bytes || bytes.length < 8) return null;
+                
+                const view = new DataView(new Uint8Array(bytes).buffer);
+                const latitude = view.getInt32(0, true) / 1000000.0;
+                const longitude = view.getInt32(4, true) / 1000000.0;
+                
+                const location = { latitude, longitude };
+                if (bytes.length >= 10) {
+                    location.altitude = view.getInt16(8, true);
+                }
+                
+                return location;
+            },
+            
+            toString(packet) {
+                const parts = [];
+                if (packet.callsign) parts.push('Callsign: ' + packet.callsign);
+                if (packet.destination) parts.push('Dest: ' + packet.destination);
+                if (packet.message) parts.push('Msg: ' + packet.message);
+                if (packet.location) {
+                    const loc = `${packet.location.latitude.toFixed(6)}, ${packet.location.longitude.toFixed(6)}` +
+                        (packet.location.altitude !== undefined ? `, ${packet.location.altitude}m` : '');
+                    parts.push('Loc: ' + loc);
+                }
+                if (packet.locationRequest) parts.push('LocReq: ' + packet.locationRequest);
+                if (packet.callRequest) parts.push('CallReq: ' + packet.callRequest);
+                if (packet.messageID !== 0) parts.push('MsgID: ' + packet.messageID);
+                return parts.join(', ');
+            }
+        };
+        
+        /**
+         * AX25 Address decoder
+         */
+        const AX25Address = {
+            decode(data, index) {
+                if (index + 7 > data.length) return null;
+                
+                let address = '';
+                for (let i = 0; i < 6; i++) {
+                    const c = String.fromCharCode(data[index + i] >> 1);
+                    if (c < ' ' || (data[index + i] & 0x01) !== 0) return null;
+                    if (c !== ' ') address += c;
+                }
+                
+                const SSID = (data[index + 6] >> 1) & 0x0F;
+                const last = (data[index + 6] & 0x01) !== 0;
+                
+                return {
+                    addr: {
+                        address,
+                        SSID,
+                        CRBit1: (data[index + 6] & 0x80) !== 0,
+                        CRBit2: (data[index + 6] & 0x40) !== 0,
+                        CRBit3: (data[index + 6] & 0x20) !== 0,
+                        toString() {
+                            return this.SSID === 0 ? this.address : `${this.address}-${this.SSID}`;
+                        },
+                        get callSignWithId() {
+                            return `${this.address}-${this.SSID}`;
+                        }
+                    },
+                    last
+                };
+            }
+        };
+        
+        /**
+         * AX25 Packet decoder
+         */
+        const AX25Packet = {
+            FrameType: {
+                I_FRAME: 0,
+                S_FRAME: 1,
+                S_FRAME_RR: 1,
+                S_FRAME_RNR: 1 | (1 << 2),
+                S_FRAME_REJ: 1 | (1 << 3),
+                S_FRAME_SREJ: 1 | (1 << 2) | (1 << 3),
+                U_FRAME: 3,
+                U_FRAME_SABM: 3 | (1 << 2) | (1 << 3) | (1 << 5),
+                U_FRAME_SABME: 3 | (1 << 3) | (1 << 5) | (1 << 6),
+                U_FRAME_DISC: 3 | (1 << 6),
+                U_FRAME_DM: 3 | (1 << 2) | (1 << 3),
+                U_FRAME_UA: 3 | (1 << 5) | (1 << 6),
+                U_FRAME_FRMR: 3 | (1 << 2) | (1 << 7),
+                U_FRAME_UI: 3,
+                U_FRAME_XID: 3 | (1 << 2) | (1 << 3) | (1 << 5) | (1 << 7),
+                U_FRAME_TEST: 3 | (1 << 5) | (1 << 6) | (1 << 7),
+                U_FRAME_MASK: 3 | (1 << 2) | (1 << 3) | (1 << 5) | (1 << 6) | (1 << 7),
+                S_FRAME_MASK: 1 | (1 << 2) | (1 << 3)
+            },
+            
+            Defs: {
+                PF: (1 << 4),
+                NS: (1 << 1) | (1 << 2) | (1 << 3),
+                NR: (1 << 5) | (1 << 6) | (1 << 7),
+                NR_MODULO128: (127 << 9),
+                NS_MODULO128: (127 << 1)
+            },
+            
+            decode(frame) {
+                const data = frame.data;
+                if (!data || data.length < 6) return null;
+                
+                // Odd packet format (not standard AX.25)
+                if (data[0] === 1) {
+                    const callsignLen = data[1];
+                    if (data.length < 3 + callsignLen) return null;
+                    const controlLen = data[2 + callsignLen];
+                    if (data.length < 4 + callsignLen + controlLen) return null;
+                    const messageLen = data[3 + callsignLen + controlLen];
+                    
+                    const decoder = new TextDecoder();
+                    const callsign = decoder.decode(new Uint8Array(data.slice(3, 3 + callsignLen - 1)));
+                    const messageData = data.slice(5 + callsignLen + controlLen, 5 + callsignLen + controlLen + messageLen - 1);
+                    
+                    return {
+                        addresses: [{ address: callsign, SSID: 0, toString() { return this.address; } }],
+                        nr: null,
+                        ns: null,
+                        pollFinal: null,
+                        command: null,
+                        type: null,
+                        data: messageData,
+                        dataStr: decoder.decode(new Uint8Array(messageData)),
+                        pid: 0,
+                        channel_id: frame.channelId,
+                        channel_name: frame.channelName,
+                        incoming: frame.incoming,
+                        frame_size: data.length
+                    };
+                }
+                
+                // Standard AX.25 header decoding
+                let i = 0;
+                let done = false;
+                const addresses = [];
+                
+                do {
+                    const result = AX25Address.decode(data, i);
+                    if (!result) return null;
+                    addresses.push(result.addr);
+                    done = result.last;
+                    i += 7;
+                } while (!done);
+                
+                if (addresses.length < 1) return null;
+                
+                const command = addresses[0].CRBit1;
+                const modulo128 = !addresses[0].CRBit2;
+                
+                let control = data[i++];
+                let pollFinal = false;
+                let type;
+                let pid = 0;
+                let nr = 0;
+                let ns = 0;
+                
+                const FT = this.FrameType;
+                const Defs = this.Defs;
+                
+                if ((control & FT.U_FRAME) === FT.U_FRAME) {
+                    pollFinal = ((control & Defs.PF) >> 4) !== 0;
+                    type = control & FT.U_FRAME_MASK;
+                    if (type === FT.U_FRAME_UI) pid = data[i++];
+                } else if ((control & FT.U_FRAME) === FT.S_FRAME) {
+                    type = control & FT.S_FRAME_MASK;
+                    if (modulo128) {
+                        control |= data[i++] << 8;
+                        nr = (control & Defs.NR_MODULO128) >> 8;
+                        pollFinal = ((control & Defs.PF) >> 7) !== 0;
+                    } else {
+                        nr = (control & Defs.NR) >> 5;
+                        pollFinal = ((control & Defs.PF) >> 4) !== 0;
+                    }
+                } else if ((control & 1) === FT.I_FRAME) {
+                    type = FT.I_FRAME;
+                    if (modulo128) {
+                        control |= data[i++] << 8;
+                        nr = (control & Defs.NR_MODULO128) >> 8;
+                        ns = (control & Defs.NS_MODULO128) >> 1;
+                        pollFinal = ((control & Defs.PF) >> 7) !== 0;
+                    } else {
+                        nr = (control & Defs.NR) >> 5;
+                        ns = (control & Defs.NS) >> 1;
+                        pollFinal = ((control & Defs.PF) >> 4) !== 0;
+                    }
+                    pid = data[i++];
+                } else {
+                    return null;
+                }
+                
+                const decoder = new TextDecoder();
+                let dataStr = null;
+                let packetData = null;
+                
+                if (data.length > i) {
+                    packetData = data.slice(i);
+                    dataStr = decoder.decode(new Uint8Array(packetData));
+                }
+                
+                return {
+                    addresses,
+                    nr,
+                    ns,
+                    pollFinal,
+                    command,
+                    type,
+                    data: packetData,
+                    dataStr,
+                    pid,
+                    modulo128,
+                    channel_id: frame.channelId,
+                    channel_name: frame.channelName,
+                    incoming: frame.incoming,
+                    frame_size: data.length
+                };
+            },
+            
+            getFrameTypeName(type) {
+                const FT = this.FrameType;
+                if (type === FT.I_FRAME) return 'I-FRAME';
+                if (type === FT.S_FRAME_RR) return 'S-FRAME-RR';
+                if (type === FT.S_FRAME_RNR) return 'S-FRAME-RNR';
+                if (type === FT.S_FRAME_REJ) return 'S-FRAME-REJ';
+                if (type === FT.S_FRAME_SREJ) return 'S-FRAME-SREJ';
+                if (type === FT.U_FRAME_SABM) return 'U-FRAME-SABM';
+                if (type === FT.U_FRAME_SABME) return 'U-FRAME-SABME';
+                if (type === FT.U_FRAME_DISC) return 'U-FRAME-DISC';
+                if (type === FT.U_FRAME_DM) return 'U-FRAME-DM';
+                if (type === FT.U_FRAME_UA) return 'U-FRAME-UA';
+                if (type === FT.U_FRAME_FRMR) return 'U-FRAME-FRMR';
+                if (type === FT.U_FRAME_UI) return 'U-FRAME-UI';
+                if (type === FT.U_FRAME_XID) return 'U-FRAME-XID';
+                if (type === FT.U_FRAME_TEST) return 'U-FRAME-TEST';
+                return 'Unknown';
+            }
+        };
+        
+        /**
+         * Utility functions
+         */
+        function bytesToHex(bytes) {
+            if (!bytes || bytes.length === 0) return '';
+            return Array.from(bytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join('');
+        }
+        
+        function hexToBytes(hex) {
+            if (!hex) return new Uint8Array(0);
+            const bytes = new Uint8Array(hex.length / 2);
+            for (let i = 0; i < hex.length; i += 2) {
+                bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+            }
+            return bytes;
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // =============================================================================
+        // Application State
+        // =============================================================================
+        
+        let ws = null;
+        let packets = [];
+        let selectedPacketIndex = -1;
+        let packetCountHistory = [];
+        let sortColumn = 'time';
+        let sortOrder = 'desc';
+        let uniqueChannels = new Set();
+        
+        // DOM Elements
+        const connectionStatus = document.getElementById('connectionStatus');
+        const statusText = document.getElementById('statusText');
+        const packetCountEl = document.getElementById('packetCount');
+        const packetsPerSecEl = document.getElementById('packetsPerSec');
+        const packetsBody = document.getElementById('packetsBody');
+        const emptyState = document.getElementById('emptyState');
+        const decodePanel = document.getElementById('decodePanel');
+        const decodeContent = document.getElementById('decodeContent');
+        const filterText = document.getElementById('filterText');
+        const filterChannel = document.getElementById('filterChannel');
+        const autoscrollCheck = document.getElementById('autoscroll');
+        const showDecodeCheck = document.getElementById('showDecode');
+        const clearBtn = document.getElementById('clearBtn');
+        
+        // =============================================================================
+        // WebSocket Connection
+        // =============================================================================
+        
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/messagebus`;
+            
+            updateConnectionStatus('connecting');
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                updateConnectionStatus('connected');
+                
+                // Subscribe to packet events
+                setTimeout(() => {
+                    // Subscribe to PacketStoreReady
+                    ws.send(JSON.stringify({ action: 'subscribe', deviceId: 1, name: 'PacketStoreReady' }));
+                    // Subscribe to PacketList
+                    ws.send(JSON.stringify({ action: 'subscribe', deviceId: 1, name: 'PacketList' }));
+                    // Subscribe to PacketStored
+                    ws.send(JSON.stringify({ action: 'subscribe', deviceId: 1, name: 'PacketStored' }));
+                    
+                    // Request packet list
+                    ws.send(JSON.stringify({ action: 'dispatch', deviceId: 1, name: 'RequestPacketList', data: null, store: false }));
+                }, 100);
+            };
+            
+            ws.onclose = () => {
+                updateConnectionStatus('disconnected');
+                setTimeout(connect, 3000);
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleMessage(data);
+                } catch (error) {
+                    console.error('Failed to parse message:', error);
+                }
+            };
+        }
+        
+        function updateConnectionStatus(status) {
+            connectionStatus.className = 'connection-status ' + status;
+            statusText.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+        }
+        
+        function handleMessage(data) {
+            if (data.type === 'message') {
+                if (data.name === 'PacketList') {
+                    // Full packet list received
+                    handlePacketList(data.data);
+                } else if (data.name === 'PacketStored') {
+                    // Single new packet
+                    handleNewPacket(data.data);
+                } else if (data.name === 'PacketStoreReady') {
+                    // PacketStore is ready, request packet list
+                    ws.send(JSON.stringify({ action: 'dispatch', deviceId: 1, name: 'RequestPacketList', data: null, store: false }));
+                }
+            }
+        }
+        
+        function handlePacketList(packetList) {
+            if (!Array.isArray(packetList)) return;
+            
+            packets = packetList.map(p => normalizePacket(p));
+            updateChannelFilter();
+            renderPackets();
+            updateStats();
+        }
+        
+        function handleNewPacket(packet) {
+            if (!packet) return;
+            
+            const normalizedPacket = normalizePacket(packet);
+            packets.unshift(normalizedPacket);
+            
+            // Limit to 2000 packets
+            if (packets.length > 2000) {
+                packets.pop();
+            }
+            
+            updateChannelFilter();
+            renderPackets();
+            updateStats();
+        }
+        
+        function normalizePacket(packet) {
+            // Convert hex data string back to Uint8Array if needed
+            let dataBytes = packet.data;
+            if (typeof packet.data === 'string') {
+                dataBytes = hexToBytes(packet.data);
+            } else if (packet.data && packet.data.type === 'Buffer') {
+                dataBytes = new Uint8Array(packet.data.data);
+            } else if (Array.isArray(packet.data)) {
+                dataBytes = new Uint8Array(packet.data);
+            }
+            
+            return {
+                time: new Date(packet.time),
+                incoming: packet.incoming !== false,
+                channelId: packet.channelId || packet.channel_id || 0,
+                channelName: packet.channelName || packet.channel_name || '0',
+                radioId: packet.radioId || packet.radio_id || 0,
+                data: dataBytes,
+                encoding: packet.encoding || 0,
+                frameType: packet.frameType || packet.frame_type || 0,
+                corrections: packet.corrections !== undefined ? packet.corrections : -1,
+                radioMac: packet.radioMac || null
+            };
+        }
+        
+        // =============================================================================
+        // Rendering
+        // =============================================================================
+        
+        function renderPackets() {
+            const filter = filterText.value.toLowerCase();
+            const channelFilter = filterChannel.value;
+            
+            let filtered = packets.filter(p => {
+                if (channelFilter && p.channelName !== channelFilter) return false;
+                if (filter) {
+                    const shortStr = getPacketShortString(p).toLowerCase();
+                    if (!shortStr.includes(filter)) return false;
+                }
+                return true;
+            });
+            
+            // Sort
+            filtered.sort((a, b) => {
+                let cmp = 0;
+                if (sortColumn === 'time') {
+                    cmp = a.time.getTime() - b.time.getTime();
+                } else if (sortColumn === 'channel') {
+                    cmp = a.channelName.localeCompare(b.channelName);
+                } else if (sortColumn === 'data') {
+                    cmp = getPacketShortString(a).localeCompare(getPacketShortString(b));
+                }
+                return sortOrder === 'asc' ? cmp : -cmp;
+            });
+            
+            if (filtered.length === 0) {
+                packetsBody.innerHTML = '';
+                emptyState.style.display = 'block';
+                return;
+            }
+            
+            emptyState.style.display = 'none';
+            
+            // Only render visible packets (limit to 500 for performance)
+            const visiblePackets = filtered.slice(0, 500);
+            
+            packetsBody.innerHTML = visiblePackets.map((packet, idx) => {
+                const originalIndex = packets.indexOf(packet);
+                const isSelected = originalIndex === selectedPacketIndex;
+                const timeStr = packet.time.toLocaleTimeString();
+                const shortStr = getPacketShortString(packet);
+                const dirIcon = packet.incoming ? '▶' : '◀';
+                const dirClass = packet.incoming ? 'direction-in' : 'direction-out';
+                
+                return `
+                    <tr class="${isSelected ? 'selected' : ''}" onclick="selectPacket(${originalIndex})">
+                        <td><span class="direction-icon ${dirClass}">${dirIcon}</span></td>
+                        <td>${escapeHtml(timeStr)}</td>
+                        <td><span class="channel-badge">${escapeHtml(packet.channelName)}</span></td>
+                        <td>${escapeHtml(shortStr)}</td>
+                    </tr>
+                `;
+            }).join('');
+            
+            // Auto-scroll to top (newest) if enabled
+            if (autoscrollCheck.checked) {
+                document.querySelector('.packets-table-container').scrollTop = 0;
+            }
+        }
+        
+        function getPacketShortString(packet) {
+            if (!packet.data || packet.data.length === 0) return '(empty)';
+            
+            // Try BSS protocol first
+            if (BSSPacket.isBSSPacket(packet.data)) {
+                const bss = BSSPacket.decode(packet.data);
+                if (bss) {
+                    return BSSPacket.toString(bss);
+                }
+            }
+            
+            // Try AX.25
+            const ax25 = AX25Packet.decode(packet);
+            if (ax25) {
+                let str = '';
+                if (ax25.addresses.length > 1) {
+                    str += ax25.addresses[1].toString() + '>';
+                }
+                if (ax25.addresses.length > 0) {
+                    str += ax25.addresses[0].toString();
+                }
+                for (let i = 2; i < ax25.addresses.length; i++) {
+                    str += ',' + ax25.addresses[i].toString() + (ax25.addresses[i].CRBit1 ? '*' : '');
+                }
+                
+                if (str.length > 0) str += ': ';
+                
+                if (packet.channelName === 'APRS' && ax25.type === AX25Packet.FrameType.U_FRAME_UI) {
+                    str += ax25.dataStr || '';
+                } else {
+                    const typeName = AX25Packet.getFrameTypeName(ax25.type);
+                    str += typeName;
+                    if (ax25.type !== AX25Packet.FrameType.U_FRAME_UI && ax25.type !== AX25Packet.FrameType.U_FRAME_SABM) {
+                        str += `, NR:${ax25.nr}, NS:${ax25.ns}`;
+                    }
+                    if (ax25.data && ax25.data.length > 0) {
+                        str += ': ' + bytesToHex(ax25.data.slice(0, 20));
+                        if (ax25.data.length > 20) str += '...';
+                    }
+                }
+                return str.replace(/\r/g, '').replace(/\n/g, '');
+            }
+            
+            // Fallback to hex
+            return bytesToHex(packet.data.slice(0, 40)) + (packet.data.length > 40 ? '...' : '');
+        }
+        
+        function selectPacket(index) {
+            selectedPacketIndex = index;
+            renderPackets();
+            renderDecode();
+        }
+        
+        function renderDecode() {
+            if (selectedPacketIndex < 0 || selectedPacketIndex >= packets.length) {
+                decodeContent.innerHTML = '<div class="decode-placeholder">Select a packet to view decoded information</div>';
+                return;
+            }
+            
+            const packet = packets[selectedPacketIndex];
+            let html = '';
+            
+            // Raw packet info section
+            html += '<div class="decode-section">';
+            html += '<div class="decode-section-header">📋 Raw Packet</div>';
+            html += '<div class="decode-section-content">';
+            html += decodeRow('Direction', packet.incoming ? 'Received' : 'Sent');
+            html += decodeRow('Channel', (packet.channelId + 1) + ' (' + packet.channelName + ')');
+            html += decodeRow('Time', packet.time.toLocaleString());
+            if (packet.data) {
+                html += decodeRow('Size', packet.data.length + ' byte' + (packet.data.length !== 1 ? 's' : ''));
+                
+                // ASCII representation
+                const decoder = new TextDecoder();
+                try {
+                    const ascii = decoder.decode(new Uint8Array(packet.data));
+                    html += decodeRow('Data', ascii);
+                } catch (e) {}
+                
+                html += decodeRowHex('Data HEX', bytesToHex(packet.data));
+            }
+            
+            // Encoding info
+            const encodingNames = {
+                0: 'Unknown',
+                1: 'Loopback',
+                2: 'Hardware AFSK 1200 baud',
+                3: 'Software AFSK 1200 baud',
+                4: 'Software PSK 2400 baud',
+                5: 'Software PSK 4800 baud',
+                6: 'Software G3RUH 9600 baud'
+            };
+            const frameTypeNames = { 0: 'Unknown', 1: 'AX.25', 2: 'FX.25' };
+            
+            if (packet.encoding > 0) {
+                let encStr = encodingNames[packet.encoding] || 'Unknown';
+                if (packet.frameType > 0) encStr += ', ' + (frameTypeNames[packet.frameType] || 'Unknown');
+                if (packet.corrections === 0) encStr += ', No Corrections';
+                else if (packet.corrections === 1) encStr += ', 1 Correction';
+                else if (packet.corrections > 1) encStr += ', ' + packet.corrections + ' Corrections';
+                html += decodeRow('Encoding', encStr);
+            }
+            html += '</div></div>';
+            
+            // Try BSS decode
+            if (BSSPacket.isBSSPacket(packet.data)) {
+                const bss = BSSPacket.decode(packet.data);
+                if (bss) {
+                    html += '<div class="decode-section">';
+                    html += '<div class="decode-section-header">📡 BSS Protocol</div>';
+                    html += '<div class="decode-section-content">';
+                    if (bss.callsign) html += decodeRow('Callsign', bss.callsign);
+                    if (bss.messageID !== 0) html += decodeRow('Message ID', bss.messageID);
+                    if (bss.destination) html += decodeRow('Destination', bss.destination);
+                    if (bss.message) html += decodeRow('Message', bss.message);
+                    if (bss.location) {
+                        const rawLoc = bss.rawFields.get(BSSPacket.FieldType.Location);
+                        if (rawLoc) html += decodeRowHex('Location HEX', bytesToHex(rawLoc));
+                        html += decodeRow('Location', `${bss.location.latitude.toFixed(6)}, ${bss.location.longitude.toFixed(6)}` +
+                            (bss.location.altitude !== undefined ? `, ${bss.location.altitude}m` : ''));
+                    }
+                    if (bss.locationRequest) html += decodeRow('Location Request', bss.locationRequest);
+                    if (bss.callRequest) html += decodeRow('Call Request', bss.callRequest);
+                    
+                    // Unknown fields
+                    bss.rawFields.forEach((value, key) => {
+                        if ([0x20, 0x21, 0x24, 0x25, 0x27, 0x28].indexOf(key) === -1) {
+                            html += decodeRowHex('Field 0x' + key.toString(16).toUpperCase(), bytesToHex(value));
+                        }
+                    });
+                    html += '</div></div>';
+                } else {
+                    html += '<div class="decode-section">';
+                    html += '<div class="decode-section-header">📡 BSS Protocol</div>';
+                    html += '<div class="decode-section-content">';
+                    html += decodeRow('Decode', 'BSS Decoder failed to decode packet.');
+                    html += '</div></div>';
+                }
+            } else {
+                // Try AX.25
+                const ax25 = AX25Packet.decode(packet);
+                if (ax25) {
+                    html += '<div class="decode-section">';
+                    html += '<div class="decode-section-header">📻 AX.25 Packet</div>';
+                    html += '<div class="decode-section-content">';
+                    
+                    ax25.addresses.forEach((addr, i) => {
+                        let addrStr = addr.callSignWithId + '  ';
+                        addrStr += (addr.CRBit1 ? 'X' : '-');
+                        addrStr += (addr.CRBit2 ? 'X' : '-');
+                        addrStr += (addr.CRBit3 ? 'X' : '-');
+                        html += decodeRow('Address ' + (i + 1), addrStr);
+                    });
+                    
+                    html += decodeRow('Type', AX25Packet.getFrameTypeName(ax25.type));
+                    
+                    let controlStr = 'NS:' + ax25.ns + ', NR:' + ax25.nr;
+                    if (ax25.command) controlStr += ', Command';
+                    if (ax25.pollFinal) controlStr += ', PollFinal';
+                    if (ax25.modulo128) controlStr += ', Modulo128';
+                    html += decodeRow('Control', controlStr);
+                    
+                    if (ax25.pid > 0) html += decodeRow('Protocol ID', ax25.pid);
+                    if (ax25.dataStr) html += decodeRow('Data', ax25.dataStr);
+                    if (ax25.data) html += decodeRowHex('Data HEX', bytesToHex(ax25.data));
+                    
+                    html += '</div></div>';
+                    
+                    // Try APRS decode if it's a UI frame with PID 240
+                    if (ax25.type === AX25Packet.FrameType.U_FRAME_UI && ax25.pid === 240 && ax25.dataStr) {
+                        html += '<div class="decode-section">';
+                        html += '<div class="decode-section-header">🗺️ APRS Data</div>';
+                        html += '<div class="decode-section-content">';
+                        
+                        // Basic APRS parsing
+                        const aprsData = ax25.dataStr;
+                        if (aprsData.length > 0) {
+                            const dataTypeCh = aprsData[0];
+                            html += decodeRow('Data Type Char', dataTypeCh);
+                            html += decodeRow('Information', aprsData.substring(1));
+                            
+                            // Parse position if present
+                            const posMatch = aprsData.match(/(\d{4}\.\d{2}[NS])[\\/](\d{5}\.\d{2}[EW])/);
+                            if (posMatch) {
+                                html += decodeRow('Position', posMatch[0]);
+                            }
+                        }
+                        
+                        html += '</div></div>';
+                    }
+                } else {
+                    html += '<div class="decode-section">';
+                    html += '<div class="decode-section-header">⚠️ Decode Failed</div>';
+                    html += '<div class="decode-section-content">';
+                    html += decodeRow('Error', 'AX.25 Decoder failed to decode packet.');
+                    html += '</div></div>';
+                }
+            }
+            
+            decodeContent.innerHTML = html;
+        }
+        
+        function decodeRow(label, value) {
+            return `<div class="decode-row"><span class="decode-label">${escapeHtml(label)}</span><span class="decode-value">${escapeHtml(String(value))}</span></div>`;
+        }
+        
+        function decodeRowHex(label, value) {
+            return `<div class="decode-row"><span class="decode-label">${escapeHtml(label)}</span><span class="decode-value hex">${escapeHtml(String(value))}</span></div>`;
+        }
+        
+        function updateChannelFilter() {
+            const current = filterChannel.value;
+            uniqueChannels.clear();
+            packets.forEach(p => uniqueChannels.add(p.channelName));
+            
+            const options = ['<option value="">All Channels</option>'];
+            Array.from(uniqueChannels).sort().forEach(ch => {
+                options.push(`<option value="${escapeHtml(ch)}" ${current === ch ? 'selected' : ''}>${escapeHtml(ch)}</option>`);
+            });
+            filterChannel.innerHTML = options.join('');
+        }
+        
+        function updateStats() {
+            packetCountEl.textContent = packets.length.toLocaleString();
+        }
+        
+        // Calculate packets per second
+        setInterval(() => {
+            packetCountHistory.push(packets.length);
+            if (packetCountHistory.length > 5) {
+                const oldCount = packetCountHistory.shift();
+                const diff = packets.length - oldCount;
+                const rate = (diff / 5).toFixed(1);
+                packetsPerSecEl.textContent = rate;
+            }
+        }, 1000);
+        
+        // =============================================================================
+        // Event Handlers
+        // =============================================================================
+        
+        clearBtn.addEventListener('click', () => {
+            packets = [];
+            selectedPacketIndex = -1;
+            uniqueChannels.clear();
+            updateChannelFilter();
+            renderPackets();
+            renderDecode();
+            updateStats();
+        });
+        
+        filterText.addEventListener('input', () => {
+            renderPackets();
+        });
+        
+        filterChannel.addEventListener('change', () => {
+            renderPackets();
+        });
+        
+        showDecodeCheck.addEventListener('change', () => {
+            decodePanel.classList.toggle('hidden', !showDecodeCheck.checked);
+        });
+        
+        // Column sorting
+        document.getElementById('sortTime').addEventListener('click', () => {
+            if (sortColumn === 'time') {
+                sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+            } else {
+                sortColumn = 'time';
+                sortOrder = 'desc';
+            }
+            updateSortGlyphs();
+            renderPackets();
+        });
+        
+        document.getElementById('sortChannel').addEventListener('click', () => {
+            if (sortColumn === 'channel') {
+                sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+            } else {
+                sortColumn = 'channel';
+                sortOrder = 'asc';
+            }
+            updateSortGlyphs();
+            renderPackets();
+        });
+        
+        document.getElementById('sortData').addEventListener('click', () => {
+            if (sortColumn === 'data') {
+                sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+            } else {
+                sortColumn = 'data';
+                sortOrder = 'asc';
+            }
+            updateSortGlyphs();
+            renderPackets();
+        });
+        
+        function updateSortGlyphs() {
+            const headers = document.querySelectorAll('th');
+            headers.forEach(th => {
+                th.classList.remove('sorted-asc', 'sorted-desc');
+            });
+            
+            const colMap = { time: 'sortTime', channel: 'sortChannel', data: 'sortData' };
+            const el = document.getElementById(colMap[sortColumn]);
+            if (el) {
+                el.classList.add(sortOrder === 'asc' ? 'sorted-asc' : 'sorted-desc');
+            }
+        }
+        
+        // =============================================================================
+        // Keyboard Navigation
+        // =============================================================================
+        
+        document.addEventListener('keydown', (e) => {
+            // Only handle if packets exist
+            if (packets.length === 0) return;
+            
+            // Handle up arrow - move to newer packet (lower index)
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (selectedPacketIndex < 0) {
+                    selectPacket(0);
+                } else if (selectedPacketIndex < packets.length - 1) {
+                    selectPacket(selectedPacketIndex + 1);
+                }
+                scrollSelectedIntoView();
+            }
+            
+            // Handle down arrow - move to older packet (higher index)
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (selectedPacketIndex < 0) {
+                    selectPacket(0);
+                } else if (selectedPacketIndex > 0) {
+                    selectPacket(selectedPacketIndex - 1);
+                }
+                scrollSelectedIntoView();
+            }
+        });
+        
+        function scrollSelectedIntoView() {
+            const selectedRow = packetsBody.querySelector('tr.selected');
+            if (selectedRow) {
+                selectedRow.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }
+        }
+        
+        // =============================================================================
+        // Initialize
+        // =============================================================================
+        
+        connect();
+    </script>
+</body>
+</html>

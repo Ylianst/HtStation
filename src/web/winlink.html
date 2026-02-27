@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WinLink Gateway Monitor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e0e0e0;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 20px;
+        }
+        
+        h1 {
+            font-size: 20px;
+            font-weight: 600;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        h1 .icon {
+            font-size: 24px;
+        }
+        
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .nav-link {
+            color: #3498db;
+            text-decoration: none;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .nav-link:hover {
+            text-decoration: underline;
+        }
+        
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-weight: 500;
+            font-size: 12px;
+        }
+        
+        .connection-status.connected {
+            background: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+            border: 1px solid rgba(46, 204, 113, 0.3);
+        }
+        
+        .connection-status.disconnected {
+            background: rgba(231, 76, 60, 0.2);
+            color: #e74c3c;
+            border: 1px solid rgba(231, 76, 60, 0.3);
+        }
+        
+        .connection-status.connecting {
+            background: rgba(241, 196, 15, 0.2);
+            color: #f1c40f;
+            border: 1px solid rgba(241, 196, 15, 0.3);
+        }
+        
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+        
+        .connected .status-dot {
+            background: #2ecc71;
+            box-shadow: 0 0 10px #2ecc71;
+        }
+        
+        .disconnected .status-dot {
+            background: #e74c3c;
+        }
+        
+        .connecting .status-dot {
+            background: #f1c40f;
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .stat-card.server-status {
+            border-left: 4px solid #3498db;
+        }
+        
+        .stat-card.server-status.idle {
+            border-left-color: #2ecc71;
+        }
+        
+        .stat-card.server-status.active {
+            border-left-color: #e74c3c;
+        }
+        
+        .stat-value {
+            font-size: 28px;
+            font-weight: 600;
+            color: #3498db;
+        }
+        
+        .stat-card.server-status.idle .stat-value {
+            color: #2ecc71;
+        }
+        
+        .stat-card.server-status.active .stat-value {
+            color: #e74c3c;
+        }
+        
+        .stat-label {
+            font-size: 11px;
+            color: #888;
+            margin-top: 5px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .sessions-container {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        
+        .sessions-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .sessions-header h2 {
+            font-size: 16px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .sessions-header .live-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: #2ecc71;
+            background: rgba(46, 204, 113, 0.1);
+            padding: 4px 10px;
+            border-radius: 20px;
+        }
+        
+        .sessions-header .live-indicator .dot {
+            width: 6px;
+            height: 6px;
+            background: #2ecc71;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+        
+        .sessions-list {
+            max-height: calc(100vh - 350px);
+            overflow-y: auto;
+        }
+        
+        .sessions-list::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .sessions-list::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+        }
+        
+        .sessions-list::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+        }
+        
+        .sessions-list::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+        
+        .session-item {
+            padding: 14px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            transition: background 0.2s;
+        }
+        
+        .session-item:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+        
+        .session-item.new {
+            animation: highlight 2s ease-out;
+        }
+        
+        @keyframes highlight {
+            0% { background: rgba(46, 204, 113, 0.3); }
+            100% { background: transparent; }
+        }
+        
+        .session-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .session-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        
+        .session-callsign {
+            font-weight: 600;
+            color: #3498db;
+            font-size: 16px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        }
+        
+        .session-time {
+            font-size: 12px;
+            color: #666;
+            white-space: nowrap;
+        }
+        
+        .session-details {
+            display: flex;
+            gap: 20px;
+            margin-top: 8px;
+            font-size: 13px;
+            color: #888;
+        }
+        
+        .session-detail {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .session-detail .label {
+            color: #666;
+        }
+        
+        .session-detail .value {
+            color: #aaa;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        }
+        
+        .bytes-sent {
+            color: #e74c3c !important;
+        }
+        
+        .bytes-received {
+            color: #2ecc71 !important;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+        
+        .empty-state .icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+            opacity: 0.5;
+        }
+        
+        .empty-state p {
+            font-size: 14px;
+        }
+        
+        .active-session {
+            background: rgba(231, 76, 60, 0.1);
+            border-left: 4px solid #e74c3c;
+        }
+        
+        .active-session .session-callsign {
+            color: #e74c3c;
+        }
+        
+        .active-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(231, 76, 60, 0.2);
+            color: #e74c3c;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        
+        .active-badge .dot {
+            width: 6px;
+            height: 6px;
+            background: #e74c3c;
+            border-radius: 50%;
+            animation: pulse 1s infinite;
+        }
+        
+        @media (max-width: 768px) {
+            header {
+                flex-direction: column;
+                gap: 15px;
+                text-align: center;
+            }
+            
+            .stats {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .session-details {
+                flex-direction: column;
+                gap: 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>
+                <span class="icon">📧</span>
+                WinLink Gateway Monitor
+            </h1>
+            <div class="header-controls">
+                <a href="index.html" class="nav-link">🏠 Home</a>
+                <a href="messagebus.html" class="nav-link">📡 MessageBus</a>
+                <div id="connectionStatus" class="connection-status disconnected">
+                    <span class="status-dot"></span>
+                    <span id="statusText">Disconnected</span>
+                </div>
+            </div>
+        </header>
+        
+        <div class="stats">
+            <div id="serverStatusCard" class="stat-card server-status idle">
+                <div id="serverStatus" class="stat-value">Idle</div>
+                <div id="connectedCallsign" class="stat-label">Server Status</div>
+            </div>
+            <div class="stat-card">
+                <div id="activeSessions" class="stat-value">0</div>
+                <div class="stat-label">Active Sessions</div>
+            </div>
+            <div class="stat-card">
+                <div id="totalSessions" class="stat-value">0</div>
+                <div class="stat-label">Total Sessions</div>
+            </div>
+            <div class="stat-card">
+                <div id="totalBytes" class="stat-value">0</div>
+                <div class="stat-label">Total Data (KB)</div>
+            </div>
+        </div>
+        
+        <div class="sessions-container">
+            <div class="sessions-header">
+                <h2>
+                    📋 Session Log
+                    <span class="live-indicator">
+                        <span class="dot"></span>
+                        LIVE
+                    </span>
+                </h2>
+            </div>
+            
+            <div id="sessionsList" class="sessions-list">
+                <div class="empty-state">
+                    <div class="icon">📭</div>
+                    <p>No sessions recorded yet. Connect to the WinLink server to see activity.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let ws = null;
+        let sessions = [];
+        let serverState = { status: 'idle', activeSessions: 0 };
+        let constants = { AllDevices: -1, AllNames: '*' };
+        
+        // DOM Elements
+        const connectionStatus = document.getElementById('connectionStatus');
+        const statusText = document.getElementById('statusText');
+        const serverStatusCard = document.getElementById('serverStatusCard');
+        const serverStatusEl = document.getElementById('serverStatus');
+        const connectedCallsignEl = document.getElementById('connectedCallsign');
+        const activeSessionsEl = document.getElementById('activeSessions');
+        const totalSessionsEl = document.getElementById('totalSessions');
+        const totalBytesEl = document.getElementById('totalBytes');
+        const sessionsList = document.getElementById('sessionsList');
+        
+        // Connect to WebSocket
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/messagebus`;
+            
+            updateConnectionStatus('connecting');
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                updateConnectionStatus('connected');
+                // Subscribe to WinLink events and request current values
+                setTimeout(() => {
+                    subscribe(-1, 'WinlinkStatus');
+                    subscribe(-1, 'WinlinkLog');
+                    subscribe(-1, 'WinlinkLogEntry');
+                    
+                    // Request current stored values after subscribing
+                    setTimeout(() => {
+                        getValue(-1, 'WinlinkStatus');
+                        getValue(-1, 'WinlinkLog');
+                    }, 100);
+                }, 100);
+            };
+            
+            ws.onclose = () => {
+                updateConnectionStatus('disconnected');
+                // Reconnect after 3 seconds
+                setTimeout(connect, 3000);
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleMessage(data);
+                } catch (error) {
+                    console.error('Failed to parse message:', error);
+                }
+            };
+        }
+        
+        function updateConnectionStatus(status) {
+            connectionStatus.className = 'connection-status ' + status;
+            statusText.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+        }
+        
+        function handleMessage(data) {
+            switch (data.type) {
+                case 'welcome':
+                    constants = data.constants || constants;
+                    console.log('Connected to MessageBus', data);
+                    break;
+                    
+                case 'message':
+                    handleWinlinkMessage(data);
+                    break;
+                    
+                case 'subscribeResult':
+                    if (data.success) {
+                        console.log(`Subscribed to ${data.name}`);
+                    } else {
+                        console.warn('Subscribe failed:', data.error);
+                    }
+                    break;
+                    
+                case 'getValueResult':
+                    if (data.success && data.exists && data.value !== undefined) {
+                        // Handle getValue response same as message
+                        handleWinlinkMessage({ name: data.name, data: data.value });
+                    }
+                    break;
+                    
+                case 'error':
+                    console.error('MessageBus error:', data.error);
+                    break;
+            }
+        }
+        
+        function handleWinlinkMessage(msg) {
+            switch (msg.name) {
+                case 'WinlinkStatus':
+                    serverState = msg.data || { connectedCallsign: null, activeSessions: 0 };
+                    updateServerStatus();
+                    break;
+                    
+                case 'WinlinkLog':
+                    sessions = msg.data || [];
+                    renderSessions();
+                    updateStats();
+                    break;
+                    
+                case 'WinlinkLogEntry':
+                    // New session entry - add with highlight
+                    addNewSession(msg.data);
+                    break;
+            }
+        }
+        
+        function updateServerStatus() {
+            const connectedCallsign = serverState.connectedCallsign;
+            const isActive = connectedCallsign !== null && connectedCallsign !== undefined;
+            
+            serverStatusCard.className = 'stat-card server-status ' + (isActive ? 'active' : 'idle');
+            
+            if (isActive) {
+                serverStatusEl.textContent = connectedCallsign;
+                connectedCallsignEl.textContent = 'Connected Station';
+            } else {
+                serverStatusEl.textContent = 'Idle';
+                connectedCallsignEl.textContent = 'Server Status';
+            }
+            
+            activeSessionsEl.textContent = serverState.activeSessions || 0;
+        }
+        
+        function addNewSession(entry) {
+            // Check if already exists (by matching callsign and connectTime)
+            const exists = sessions.some(s => 
+                s.callsign === entry.callsign && 
+                s.connectTime === entry.connectTime
+            );
+            
+            if (!exists) {
+                sessions.unshift(entry);
+                // Limit to 200
+                if (sessions.length > 200) {
+                    sessions = sessions.slice(0, 200);
+                }
+            }
+            
+            renderSessions(true);
+            updateStats();
+        }
+        
+        function updateStats() {
+            totalSessionsEl.textContent = sessions.length;
+            
+            // Calculate total bytes
+            let totalBytes = 0;
+            sessions.forEach(s => {
+                totalBytes += (s.bytesSent || 0) + (s.bytesReceived || 0);
+            });
+            totalBytesEl.textContent = (totalBytes / 1024).toFixed(1);
+        }
+        
+        function renderSessions(highlightFirst = false) {
+            if (sessions.length === 0) {
+                sessionsList.innerHTML = `
+                    <div class="empty-state">
+                        <div class="icon">📭</div>
+                        <p>No sessions recorded yet. Connect to the WinLink server to see activity.</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            sessionsList.innerHTML = sessions.map((session, index) => {
+                const connectTime = new Date(session.connectTime);
+                const disconnectTime = new Date(session.disconnectTime);
+                const duration = formatDuration(session.durationMs);
+                const dateStr = connectTime.toLocaleDateString();
+                const timeStr = connectTime.toLocaleTimeString();
+                
+                const isNew = highlightFirst && index === 0;
+                
+                return `
+                    <div class="session-item ${isNew ? 'new' : ''}">
+                        <div class="session-header">
+                            <div class="session-info">
+                                <span class="session-callsign">${escapeHtml(session.callsign)}</span>
+                            </div>
+                            <span class="session-time">${dateStr} ${timeStr}</span>
+                        </div>
+                        <div class="session-details">
+                            <div class="session-detail">
+                                <span class="label">Duration:</span>
+                                <span class="value">${duration}</span>
+                            </div>
+                            <div class="session-detail">
+                                <span class="label">Sent:</span>
+                                <span class="value bytes-sent">${formatBytes(session.bytesSent)}</span>
+                            </div>
+                            <div class="session-detail">
+                                <span class="label">Received:</span>
+                                <span class="value bytes-received">${formatBytes(session.bytesReceived)}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        function formatDuration(ms) {
+            if (!ms || ms < 0) return '0s';
+            
+            const seconds = Math.floor(ms / 1000);
+            const minutes = Math.floor(seconds / 60);
+            const hours = Math.floor(minutes / 60);
+            
+            if (hours > 0) {
+                return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
+            } else if (minutes > 0) {
+                return `${minutes}m ${seconds % 60}s`;
+            } else {
+                return `${seconds}s`;
+            }
+        }
+        
+        function formatBytes(bytes) {
+            if (!bytes || bytes === 0) return '0 B';
+            
+            if (bytes < 1024) {
+                return `${bytes} B`;
+            } else if (bytes < 1024 * 1024) {
+                return `${(bytes / 1024).toFixed(1)} KB`;
+            } else {
+                return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+            }
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function subscribe(deviceId, name) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                console.warn('WebSocket not connected');
+                return;
+            }
+            
+            ws.send(JSON.stringify({
+                action: 'subscribe',
+                deviceId: deviceId,
+                name: name
+            }));
+        }
+        
+        function getValue(deviceId, name) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                console.warn('WebSocket not connected');
+                return;
+            }
+            
+            ws.send(JSON.stringify({
+                action: 'getValue',
+                deviceId: deviceId,
+                name: name
+            }));
+        }
+        
+        // Initialize
+        connect();
+    </script>
+</body>
+</html>

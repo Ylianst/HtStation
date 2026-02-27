@@ -1,0 +1,999 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MessageBus Monitor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e0e0e0;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 15px;
+        }
+        
+        h1 {
+            font-size: 20px;
+            font-weight: 600;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        h1 .icon {
+            font-size: 24px;
+        }
+        
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .toggle-panel-btn {
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: all 0.2s;
+        }
+        
+        .toggle-panel-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+        
+        .collapsible-panel {
+            display: none;
+            margin-bottom: 15px;
+        }
+        
+        .collapsible-panel.visible {
+            display: block;
+        }
+        
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-weight: 500;
+            font-size: 12px;
+        }
+        
+        .connection-status.connected {
+            background: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+            border: 1px solid rgba(46, 204, 113, 0.3);
+        }
+        
+        .connection-status.disconnected {
+            background: rgba(231, 76, 60, 0.2);
+            color: #e74c3c;
+            border: 1px solid rgba(231, 76, 60, 0.3);
+        }
+        
+        .connection-status.connecting {
+            background: rgba(241, 196, 15, 0.2);
+            color: #f1c40f;
+            border: 1px solid rgba(241, 196, 15, 0.3);
+        }
+        
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+        
+        .connected .status-dot {
+            background: #2ecc71;
+            box-shadow: 0 0 10px #2ecc71;
+        }
+        
+        .disconnected .status-dot {
+            background: #e74c3c;
+        }
+        
+        .connecting .status-dot {
+            background: #f1c40f;
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+        
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .control-group label {
+            font-size: 12px;
+            color: #aaa;
+            white-space: nowrap;
+        }
+        
+        input[type="text"], input[type="number"], select {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #fff;
+            padding: 6px 10px;
+            border-radius: 5px;
+            font-size: 13px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        
+        input[type="text"]:focus, input[type="number"]:focus, select:focus {
+            border-color: #3498db;
+        }
+        
+        input[type="number"] {
+            width: 70px;
+        }
+        
+        button {
+            padding: 7px 14px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: #fff;
+        }
+        
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #2980b9 0%, #1f6dad 100%);
+            transform: translateY(-1px);
+        }
+        
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+        
+        .btn-danger {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+            color: #fff;
+        }
+        
+        .btn-danger:hover {
+            background: linear-gradient(135deg, #c0392b 0%, #a93226 100%);
+        }
+        
+        .btn-success {
+            background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
+            color: #fff;
+        }
+        
+        .btn-success:hover {
+            background: linear-gradient(135deg, #27ae60 0%, #1e8449 100%);
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        
+        .stat-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 10px 14px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 22px;
+            font-weight: 600;
+            color: #3498db;
+        }
+        
+        .stat-label {
+            font-size: 10px;
+            color: #888;
+            margin-top: 3px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .compact-stats {
+            display: flex;
+            gap: 15px;
+            font-size: 12px;
+            color: #888;
+        }
+        
+        .compact-stats span {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .compact-stats .value {
+            color: #3498db;
+            font-weight: 600;
+        }
+        
+        .messages-container {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        
+        .messages-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .messages-header h2 {
+            font-size: 16px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .messages-header .live-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: #2ecc71;
+            background: rgba(46, 204, 113, 0.1);
+            padding: 4px 10px;
+            border-radius: 20px;
+        }
+        
+        .messages-header .live-indicator .dot {
+            width: 6px;
+            height: 6px;
+            background: #2ecc71;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+        
+        .filter-bar {
+            display: flex;
+            gap: 10px;
+            padding: 12px 20px;
+            background: rgba(255, 255, 255, 0.02);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        
+        .filter-bar input {
+            flex: 1;
+            min-width: 150px;
+        }
+        
+        .messages-list {
+            max-height: calc(100vh - 200px);
+            overflow-y: auto;
+        }
+        
+        .messages-list::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .messages-list::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+        }
+        
+        .messages-list::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+        }
+        
+        .messages-list::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+        
+        .message-item {
+            padding: 14px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .message-item:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+        
+        .message-item.expanded {
+            background: rgba(52, 152, 219, 0.1);
+        }
+        
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 15px;
+        }
+        
+        .message-info {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        
+        .message-name {
+            font-weight: 600;
+            color: #3498db;
+            font-size: 14px;
+        }
+        
+        .message-device {
+            background: rgba(155, 89, 182, 0.2);
+            color: #9b59b6;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        
+        .message-time {
+            font-size: 12px;
+            color: #666;
+            white-space: nowrap;
+        }
+        
+        .message-preview {
+            font-size: 13px;
+            color: #888;
+            margin-top: 6px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+        }
+        
+        .message-details {
+            display: none;
+            margin-top: 12px;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            color: #98c379;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .message-item.expanded .message-details {
+            display: block;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+        
+        .empty-state .icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+            opacity: 0.5;
+        }
+        
+        .empty-state p {
+            font-size: 14px;
+        }
+        
+        .checkbox-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .checkbox-wrapper input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+        
+        .paused-banner {
+            display: none;
+            background: rgba(241, 196, 15, 0.2);
+            border: 1px solid rgba(241, 196, 15, 0.3);
+            color: #f1c40f;
+            padding: 10px 20px;
+            text-align: center;
+            font-size: 14px;
+        }
+        
+        .paused-banner.visible {
+            display: block;
+        }
+        
+        .subscriptions-panel {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 10px 14px;
+            margin-bottom: 12px;
+        }
+        
+        .subscriptions-panel h3 {
+            font-size: 12px;
+            color: #aaa;
+            margin-bottom: 8px;
+        }
+        
+        .subscriptions-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        
+        .subscription-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(52, 152, 219, 0.2);
+            color: #3498db;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+        }
+        
+        .subscription-tag .remove {
+            cursor: pointer;
+            opacity: 0.7;
+            transition: opacity 0.2s;
+        }
+        
+        .subscription-tag .remove:hover {
+            opacity: 1;
+        }
+        
+        @media (max-width: 768px) {
+            .controls {
+                flex-direction: column;
+            }
+            
+            .control-group {
+                flex-wrap: wrap;
+            }
+            
+            header {
+                flex-direction: column;
+                gap: 15px;
+                text-align: center;
+            }
+            
+            .stats {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>
+                <span class="icon">📡</span>
+                MessageBus Monitor
+            </h1>
+            <div class="header-controls">
+                <a href="index.html" style="color: #3498db; text-decoration: none; font-size: 14px;">🏠 Home</a>
+                <div class="compact-stats">
+                    <span>Messages: <span id="totalMessagesCompact" class="value">0</span></span>
+                    <span>Rate: <span id="messagesPerSecCompact" class="value">0</span>/s</span>
+                    <span>Events: <span id="uniqueEventsCompact" class="value">0</span></span>
+                </div>
+                <button id="togglePanelBtn" class="toggle-panel-btn">⚙️ Settings</button>
+                <div id="connectionStatus" class="connection-status disconnected">
+                    <span class="status-dot"></span>
+                    <span id="statusText">Disconnected</span>
+                </div>
+            </div>
+        </header>
+        
+        <div id="collapsiblePanel" class="collapsible-panel">
+            <div class="controls">
+                <div class="control-group">
+                    <label>Device ID:</label>
+                    <input type="number" id="deviceId" value="-1" placeholder="-1 for all">
+                </div>
+                <div class="control-group">
+                    <label>Event Name:</label>
+                    <input type="text" id="eventName" value="*" placeholder="* for all">
+                </div>
+                <button id="subscribeBtn" class="btn-success">Subscribe</button>
+                <button id="unsubscribeAllBtn" class="btn-secondary">Unsubscribe All</button>
+                <button id="clearBtn" class="btn-secondary">Clear Messages</button>
+            </div>
+            
+            <div class="subscriptions-panel">
+                <h3>Active Subscriptions</h3>
+                <div id="subscriptionsList" class="subscriptions-list">
+                    <span style="color: #666; font-size: 12px;">No active subscriptions</span>
+                </div>
+            </div>
+            
+            <div class="stats">
+                <div class="stat-card">
+                    <div id="totalMessages" class="stat-value">0</div>
+                    <div class="stat-label">Total Messages</div>
+                </div>
+                <div class="stat-card">
+                    <div id="messagesPerSec" class="stat-value">0</div>
+                    <div class="stat-label">Messages/sec</div>
+                </div>
+                <div class="stat-card">
+                    <div id="uniqueEvents" class="stat-value">0</div>
+                    <div class="stat-label">Unique Events</div>
+                </div>
+                <div class="stat-card">
+                    <div id="uniqueDevices" class="stat-value">0</div>
+                    <div class="stat-label">Unique Devices</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="messages-container">
+            <div class="messages-header">
+                <h2>
+                    📨 Messages
+                    <span class="live-indicator">
+                        <span class="dot"></span>
+                        LIVE
+                    </span>
+                </h2>
+                <div class="checkbox-wrapper">
+                    <input type="checkbox" id="autoscroll" checked>
+                    <label for="autoscroll">Auto-scroll</label>
+                    <input type="checkbox" id="pauseUpdates">
+                    <label for="pauseUpdates">Pause</label>
+                </div>
+            </div>
+            
+            <div id="pausedBanner" class="paused-banner">
+                ⏸️ Updates paused. New messages are being buffered.
+            </div>
+            
+            <div class="filter-bar">
+                <input type="text" id="filterText" placeholder="Filter by event name or content...">
+                <select id="filterDevice">
+                    <option value="">All Devices</option>
+                </select>
+            </div>
+            
+            <div id="messagesList" class="messages-list">
+                <div class="empty-state">
+                    <div class="icon">📭</div>
+                    <p>No messages yet. Subscribe to events to start receiving messages.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let ws = null;
+        let messages = [];
+        let subscriptions = new Map();
+        let messageCount = 0;
+        let messageCountHistory = [];
+        let uniqueEvents = new Set();
+        let uniqueDevices = new Set();
+        let isPaused = false;
+        let bufferedMessages = [];
+        let constants = { AllDevices: -1, AllNames: '*' };
+        
+        // DOM Elements
+        const connectionStatus = document.getElementById('connectionStatus');
+        const statusText = document.getElementById('statusText');
+        const deviceIdInput = document.getElementById('deviceId');
+        const eventNameInput = document.getElementById('eventName');
+        const subscribeBtn = document.getElementById('subscribeBtn');
+        const unsubscribeAllBtn = document.getElementById('unsubscribeAllBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const subscriptionsList = document.getElementById('subscriptionsList');
+        const messagesList = document.getElementById('messagesList');
+        const totalMessagesEl = document.getElementById('totalMessages');
+        const messagesPerSecEl = document.getElementById('messagesPerSec');
+        const uniqueEventsEl = document.getElementById('uniqueEvents');
+        const uniqueDevicesEl = document.getElementById('uniqueDevices');
+        const totalMessagesCompactEl = document.getElementById('totalMessagesCompact');
+        const messagesPerSecCompactEl = document.getElementById('messagesPerSecCompact');
+        const uniqueEventsCompactEl = document.getElementById('uniqueEventsCompact');
+        const autoscrollCheck = document.getElementById('autoscroll');
+        const pauseCheck = document.getElementById('pauseUpdates');
+        const pausedBanner = document.getElementById('pausedBanner');
+        const filterText = document.getElementById('filterText');
+        const filterDevice = document.getElementById('filterDevice');
+        const togglePanelBtn = document.getElementById('togglePanelBtn');
+        const collapsiblePanel = document.getElementById('collapsiblePanel');
+        
+        // Connect to WebSocket
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/messagebus`;
+            
+            updateConnectionStatus('connecting');
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                updateConnectionStatus('connected');
+                // Auto-subscribe to all messages on connect
+                setTimeout(() => {
+                    subscribe(-1, '*');
+                }, 100);
+            };
+            
+            ws.onclose = () => {
+                updateConnectionStatus('disconnected');
+                // Reconnect after 3 seconds
+                setTimeout(connect, 3000);
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleMessage(data);
+                } catch (error) {
+                    console.error('Failed to parse message:', error);
+                }
+            };
+        }
+        
+        function updateConnectionStatus(status) {
+            connectionStatus.className = 'connection-status ' + status;
+            statusText.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+        }
+        
+        function handleMessage(data) {
+            switch (data.type) {
+                case 'welcome':
+                    constants = data.constants || constants;
+                    console.log('Connected to MessageBus', data);
+                    break;
+                    
+                case 'message':
+                    addMessage(data);
+                    break;
+                    
+                case 'subscribeResult':
+                    if (data.success) {
+                        const key = `${data.deviceId}:${data.name}`;
+                        subscriptions.set(key, { deviceId: data.deviceId, name: data.name });
+                        updateSubscriptionsList();
+                    } else {
+                        console.warn('Subscribe failed:', data.error);
+                    }
+                    break;
+                    
+                case 'unsubscribeResult':
+                    if (data.success) {
+                        const key = `${data.deviceId}:${data.name}`;
+                        subscriptions.delete(key);
+                        updateSubscriptionsList();
+                    }
+                    break;
+                    
+                case 'error':
+                    console.error('MessageBus error:', data.error);
+                    break;
+            }
+        }
+        
+        function addMessage(msg) {
+            messageCount++;
+            uniqueEvents.add(msg.name);
+            uniqueDevices.add(msg.deviceId);
+            
+            const messageItem = {
+                id: messageCount,
+                deviceId: msg.deviceId,
+                name: msg.name,
+                data: msg.data,
+                timestamp: msg.timestamp || new Date().toISOString()
+            };
+            
+            if (isPaused) {
+                bufferedMessages.push(messageItem);
+                return;
+            }
+            
+            messages.unshift(messageItem);
+            
+            // Limit to 500 messages
+            if (messages.length > 500) {
+                messages.pop();
+            }
+            
+            updateStats();
+            renderMessages();
+            updateDeviceFilter();
+        }
+        
+        function updateStats() {
+            totalMessagesEl.textContent = messageCount.toLocaleString();
+            uniqueEventsEl.textContent = uniqueEvents.size;
+            uniqueDevicesEl.textContent = uniqueDevices.size;
+            // Update compact stats in header
+            totalMessagesCompactEl.textContent = messageCount.toLocaleString();
+            uniqueEventsCompactEl.textContent = uniqueEvents.size;
+        }
+        
+        // Calculate messages per second
+        setInterval(() => {
+            messageCountHistory.push(messageCount);
+            if (messageCountHistory.length > 5) {
+                const oldCount = messageCountHistory.shift();
+                const diff = messageCount - oldCount;
+                const rate = (diff / 5).toFixed(1);
+                messagesPerSecEl.textContent = rate;
+                messagesPerSecCompactEl.textContent = rate;
+            }
+        }, 1000);
+        
+        function renderMessages() {
+            const filter = filterText.value.toLowerCase();
+            const deviceFilter = filterDevice.value;
+            
+            const filtered = messages.filter(msg => {
+                if (deviceFilter && msg.deviceId.toString() !== deviceFilter) {
+                    return false;
+                }
+                if (filter) {
+                    const msgStr = JSON.stringify(msg).toLowerCase();
+                    if (!msgStr.includes(filter)) {
+                        return false;
+                    }
+                }
+                return true;
+            });
+            
+            if (filtered.length === 0) {
+                messagesList.innerHTML = `
+                    <div class="empty-state">
+                        <div class="icon">📭</div>
+                        <p>${messages.length === 0 ? 'No messages yet. Subscribe to events to start receiving messages.' : 'No messages match your filter.'}</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            messagesList.innerHTML = filtered.slice(0, 100).map(msg => {
+                const time = new Date(msg.timestamp).toLocaleTimeString();
+                const preview = formatPreview(msg.data);
+                const details = formatDetails(msg.data);
+                
+                return `
+                    <div class="message-item" onclick="toggleMessage(this)">
+                        <div class="message-header">
+                            <div class="message-info">
+                                <span class="message-name">${escapeHtml(msg.name)}</span>
+                                <span class="message-device">Device: ${msg.deviceId}</span>
+                            </div>
+                            <span class="message-time">${time}</span>
+                        </div>
+                        <div class="message-preview">${escapeHtml(preview)}</div>
+                        <div class="message-details">${escapeHtml(details)}</div>
+                    </div>
+                `;
+            }).join('');
+            
+            if (autoscrollCheck.checked && !isPaused) {
+                messagesList.scrollTop = 0;
+            }
+        }
+        
+        function formatPreview(data) {
+            if (data === null || data === undefined) {
+                return 'null';
+            }
+            if (typeof data === 'object') {
+                return JSON.stringify(data).slice(0, 150);
+            }
+            return String(data).slice(0, 150);
+        }
+        
+        function formatDetails(data) {
+            if (data === null || data === undefined) {
+                return 'null';
+            }
+            try {
+                return JSON.stringify(data, null, 2);
+            } catch {
+                return String(data);
+            }
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function toggleMessage(element) {
+            element.classList.toggle('expanded');
+        }
+        
+        function updateSubscriptionsList() {
+            if (subscriptions.size === 0) {
+                subscriptionsList.innerHTML = '<span style="color: #666; font-size: 13px;">No active subscriptions</span>';
+                return;
+            }
+            
+            subscriptionsList.innerHTML = Array.from(subscriptions.entries()).map(([key, sub]) => {
+                const deviceLabel = sub.deviceId === constants.AllDevices ? 'All' : sub.deviceId;
+                const nameLabel = sub.name === constants.AllNames ? '*' : sub.name;
+                return `
+                    <span class="subscription-tag">
+                        Device: ${deviceLabel} | Event: ${nameLabel}
+                        <span class="remove" onclick="unsubscribe(${sub.deviceId}, '${sub.name}')">&times;</span>
+                    </span>
+                `;
+            }).join('');
+        }
+        
+        function updateDeviceFilter() {
+            const current = filterDevice.value;
+            const options = ['<option value="">All Devices</option>'];
+            
+            Array.from(uniqueDevices).sort((a, b) => a - b).forEach(id => {
+                options.push(`<option value="${id}" ${current === String(id) ? 'selected' : ''}>Device ${id}</option>`);
+            });
+            
+            filterDevice.innerHTML = options.join('');
+        }
+        
+        function subscribe(deviceId, name) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                console.warn('WebSocket not connected');
+                return;
+            }
+            
+            ws.send(JSON.stringify({
+                action: 'subscribe',
+                deviceId: deviceId,
+                name: name
+            }));
+        }
+        
+        function unsubscribe(deviceId, name) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                console.warn('WebSocket not connected');
+                return;
+            }
+            
+            ws.send(JSON.stringify({
+                action: 'unsubscribe',
+                deviceId: deviceId,
+                name: name
+            }));
+        }
+        
+        // Event Listeners
+        subscribeBtn.addEventListener('click', () => {
+            const deviceId = parseInt(deviceIdInput.value) || -1;
+            const name = eventNameInput.value.trim() || '*';
+            subscribe(deviceId, name);
+        });
+        
+        unsubscribeAllBtn.addEventListener('click', () => {
+            // Unsubscribe from all current subscriptions
+            subscriptions.forEach((sub, key) => {
+                unsubscribe(sub.deviceId, sub.name);
+            });
+        });
+        
+        togglePanelBtn.addEventListener('click', () => {
+            collapsiblePanel.classList.toggle('visible');
+            togglePanelBtn.textContent = collapsiblePanel.classList.contains('visible') ? '⚙️ Hide Settings' : '⚙️ Settings';
+        });
+        
+        clearBtn.addEventListener('click', () => {
+            messages = [];
+            messageCount = 0;
+            uniqueEvents.clear();
+            uniqueDevices.clear();
+            messageCountHistory = [];
+            updateStats();
+            renderMessages();
+            updateDeviceFilter();
+        });
+        
+        pauseCheck.addEventListener('change', () => {
+            isPaused = pauseCheck.checked;
+            pausedBanner.classList.toggle('visible', isPaused);
+            
+            if (!isPaused && bufferedMessages.length > 0) {
+                // Process buffered messages
+                bufferedMessages.forEach(msg => {
+                    messages.unshift(msg);
+                });
+                bufferedMessages = [];
+                
+                // Trim if needed
+                while (messages.length > 500) {
+                    messages.pop();
+                }
+                
+                renderMessages();
+            }
+        });
+        
+        filterText.addEventListener('input', () => {
+            renderMessages();
+        });
+        
+        filterDevice.addEventListener('change', () => {
+            renderMessages();
+        });
+        
+        // Initialize
+        connect();
+    </script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 // RadioCodec.js
 // Contains all encoding and decoding logic for radio commands and payloads
 
-const { getShort, getInt } = require('./utils');
+const { getShort, getInt } = require('../utils');
 
 module.exports = {
     decodeHtStatus(msg) {

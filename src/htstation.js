@@ -71,9 +71,15 @@ const logger = getLogger();
 global.logger = logger;
 
 // NOW load modules that depend on global.logger
-const Radio = require('./Radio.js');
+const Radio = require('./radio/Radio.js');
 const MqttReporter = require('./utils/MqttReporter');
 const RadioController = require('./radioctl.js');
+const DataBroker = require('./utils/DataBroker');
+const FrameDeduplicator = require('./utils/FrameDeduplicator');
+const PacketStore = require('./utils/PacketStore');
+
+// Initialize the Data Broker with file-based persistence for device 0 (Linux equivalent of Windows registry)
+DataBroker.initialize(path.join(__dirname, '../data/databroker.json'));
 
 // Display welcome message
 console.log(`Handi-Talky Station v${require('../package.json').version}`);
@@ -142,23 +148,32 @@ if (mqttEnabled) {
 }
 
 // To disable channel info loading, set loadChannels to false
-const radio = new Radio(RADIO_MAC_ADDRESS, { loadChannels: true });
+const radio = new Radio(2, RADIO_MAC_ADDRESS, { loadChannels: true });
 
 // Set the callsign for transmission safety
 radio.setCallsign(RADIO_CALLSIGN);
 
 // Initialize Radio Controller for MQTT and Home Assistant integration
 const radioController = new RadioController(config, radio, mqttReporter);
+DataBroker.addDataHandler('RadioController', radioController);
 
-// New handler for received TNC data frames
-const AX25Packet = require('./AX25Packet');
-const { AprsPacket } = require('./aprs/index.js');
+// Handler modules - each subscribes to DataBroker events independently
 const AprsHandler = require('./aprs.js');
 const EchoServer = require('./echoserver.js');
-const BbsServer = require('./bbs.js');
-const WinLinkServer = require('./winlinkserver.js');
+const BbsServer = require('./bbs/bbs.js');
+const WinLinkServer = require('./winlink/winlinkserver.js');
 const WebServer = require('./webserver.js');
 const Storage = require('./storage.js');
+const WinlinkGatewayRelay = require('./winlink/WinlinkGatewayRelay.js');
+const DataBrokerClient = require('./utils/DataBrokerClient');
+
+// Register the FrameDeduplicator as a Data Handler (deduplicates DataFrame -> UniqueDataFrame)
+const frameDeduplicator = new FrameDeduplicator();
+DataBroker.addDataHandler('FrameDeduplicator', frameDeduplicator);
+
+// Register the PacketStore as a Data Handler (stores raw packets for viewing)
+const packetStore = new PacketStore(path.join(__dirname, '../data'));
+DataBroker.addDataHandler('PacketStore', packetStore);
 
 // === Global Session Registry ===
 // Coordinates sessions between BBS, Echo, and WinLink servers to ensure only one server
@@ -195,12 +210,14 @@ const activeSessionRegistry = {
 
 // Initialize APRS handler
 const aprsHandler = new AprsHandler(config, radio, mqttReporter);
+DataBroker.addDataHandler('AprsHandler', aprsHandler);
 
 // Initialize Echo Server (conditionally)
 let echoServer = null;
 if (isEchoEnabled) {
     const echoConfig = { ...config, CALLSIGN: RADIO_CALLSIGN, STATIONID: ECHO_STATION_ID };
     echoServer = new EchoServer(echoConfig, radio, activeSessionRegistry);
+    DataBroker.addDataHandler('EchoServer', echoServer);
     appLogger.log(`[App] Echo Server initialized on ${RADIO_CALLSIGN}-${ECHO_STATION_ID}`);
 }
 
@@ -209,11 +226,13 @@ let bbsServer = null;
 if (isBbsEnabled) {
     const bbsConfig = { ...config, CALLSIGN: RADIO_CALLSIGN, STATIONID: BBS_STATION_ID };
     bbsServer = new BbsServer(bbsConfig, radio, activeSessionRegistry);
+    DataBroker.addDataHandler('BbsServer', bbsServer);
     appLogger.log(`[App] BBS Server initialized on ${RADIO_CALLSIGN}-${BBS_STATION_ID}`);
 }
 
 // Initialize Storage for WinLink
 const storage = new Storage();
+DataBroker.addDataHandler('Storage', storage);
 
 // Initialize WinLink Server (conditionally)
 let winlinkServer = null;
@@ -225,9 +244,96 @@ if (isWinlinkEnabled) {
         winlinkPassword: config.WINLINK_PASSWORD || '',
         version: '1.0'
     };
-    winlinkServer = new WinLinkServer(winlinkConfig, storage, activeSessionRegistry);
+    winlinkServer = new WinLinkServer(winlinkConfig, radio, storage, activeSessionRegistry);
+    DataBroker.addDataHandler('WinLinkServer', winlinkServer);
     appLogger.log(`[App] WinLink Server initialized on ${RADIO_CALLSIGN}-${WINLINK_STATION_ID}`);
 }
+
+// === Winlink Internet Gateway Sync Handler ===
+// Handles WinlinkSync events to connect to the Winlink CMS internet gateway
+// Usage: broker.Dispatch(1, "WinlinkSync", { Server: "server.winlink.org", Port: 8773, UseTls: true, Callsign: "CALL" }, store: false);
+const winlinkSyncBroker = new DataBrokerClient();
+winlinkSyncBroker.subscribe(DataBroker.AllDevices, 'WinlinkSync', async (deviceId, name, data) => {
+    try {
+        const server = data.Server || data.server || 'server.winlink.org';
+        const port = data.Port || data.port || 8773;
+        const useTls = data.UseTls !== undefined ? data.UseTls : (data.useTls !== undefined ? data.useTls : true);
+        const callsign = data.Callsign || data.callsign;
+        
+        if (!callsign) {
+            appLogger.error('[WinlinkSync] Missing callsign in WinlinkSync request');
+            DataBroker.dispatch(deviceId, 'WinlinkSyncResult', { 
+                success: false, 
+                error: 'Missing callsign',
+                server: server,
+                port: port
+            }, false);
+            return;
+        }
+        
+        appLogger.log(`[WinlinkSync] Connecting to Winlink gateway ${server}:${port} for ${callsign}`);
+        
+        const relay = new WinlinkGatewayRelay(deviceId, server, port, useTls);
+        
+        const connected = await relay.connectAsync(callsign, 15000);
+        
+        if (connected && relay.isConnected) {
+            appLogger.log(`[WinlinkSync] Connected to Winlink gateway successfully`);
+            appLogger.log(`[WinlinkSync] WL2K Banner: ${relay.wl2kBanner || '(none)'}`);
+            appLogger.log(`[WinlinkSync] PQ Challenge: ${relay.pqChallenge || '(none)'}`);
+            
+            // Store the relay for potential use by other modules
+            DataBroker.dispatch(deviceId, 'WinlinkSyncResult', { 
+                success: true,
+                server: server,
+                port: port,
+                callsign: callsign,
+                wl2kBanner: relay.wl2kBanner,
+                pqChallenge: relay.pqChallenge,
+                relay: relay
+            }, false);
+            
+            // Set up event handlers for the relay
+            relay.on('line', (line) => {
+                DataBroker.dispatch(deviceId, 'WinlinkRelayLine', { 
+                    callsign: callsign,
+                    line: line 
+                }, false);
+            });
+            
+            relay.on('binaryData', (data) => {
+                DataBroker.dispatch(deviceId, 'WinlinkRelayBinary', { 
+                    callsign: callsign,
+                    data: data 
+                }, false);
+            });
+            
+            relay.on('disconnected', () => {
+                appLogger.log(`[WinlinkSync] Relay disconnected for ${callsign}`);
+                DataBroker.dispatch(deviceId, 'WinlinkRelayDisconnected', { 
+                    callsign: callsign 
+                }, false);
+            });
+        } else {
+            appLogger.error(`[WinlinkSync] Failed to connect to Winlink gateway`);
+            relay.dispose();
+            
+            DataBroker.dispatch(deviceId, 'WinlinkSyncResult', { 
+                success: false, 
+                error: 'Failed to connect to CMS gateway',
+                server: server,
+                port: port
+            }, false);
+        }
+    } catch (ex) {
+        appLogger.error(`[WinlinkSync] Error: ${ex.message}`);
+        DataBroker.dispatch(deviceId, 'WinlinkSyncResult', { 
+            success: false, 
+            error: ex.message 
+        }, false);
+    }
+});
+appLogger.log('[App] WinlinkSync handler registered');
 
 // Initialize Web Server (if enabled)
 let webServer = null;
@@ -236,6 +342,7 @@ if (config.WEBSERVERPORT) {
     if (webServerPort > 0) {
         try {
             webServer = new WebServer(config, radio, bbsServer, aprsHandler, winlinkServer);
+            DataBroker.addDataHandler('WebServer', webServer);
             webServer.start(webServerPort)
                 .then(() => {
                     appLogger.log(`[App] Web server started successfully on port ${webServerPort}`);
@@ -279,67 +386,27 @@ if (config.WEBSERVERPORT) {
     appLogger.log('[App] Web server disabled (WEBSERVERPORT not configured)');
 }
 
-radio.on('data', (frame) => {
-    // Attempt to decode AX.25 packet
-    const packet = AX25Packet.decodeAX25Packet(frame);
-    if (packet) {
-        appLogger.log('[App] Decoded AX.25 packet:', packet.toString());
-        appLogger.log('[App] Formatted packet:', packet.formatAX25PacketString());
-        
-        // Check if this packet is from the APRS channel
-        if (packet.channel_name === 'APRS') {
-            aprsHandler.processAprsPacket(packet);
-            return;
-        }
-        
-        // Route packet to appropriate server based on destination SSID
-        let processed = false;
-        
-        // Check if packet addresses our station
-        if (packet.addresses && packet.addresses.length >= 1) {
-            const firstAddr = packet.addresses[0];
-            
-            // Try BBS server if enabled and packet is addressed to BBS SSID
-            if (bbsServer && firstAddr.address === RADIO_CALLSIGN && firstAddr.SSID == BBS_STATION_ID) {
-                appLogger.log(`[App] Routing packet to BBS Server (${RADIO_CALLSIGN}-${BBS_STATION_ID})`);
-                bbsServer.processPacket(packet);
-                processed = true;
-            }
-            
-            // Try Echo server if enabled and packet is addressed to Echo SSID (and not already processed)
-            if (!processed && echoServer && firstAddr.address === RADIO_CALLSIGN && firstAddr.SSID == ECHO_STATION_ID) {
-                appLogger.log(`[App] Routing packet to Echo Server (${RADIO_CALLSIGN}-${ECHO_STATION_ID})`);
-                echoServer.processPacket(packet);
-                processed = true;
-            }
-            
-            // Try WinLink server if enabled and packet is addressed to WinLink SSID (and not already processed)
-            if (!processed && winlinkServer && firstAddr.address === RADIO_CALLSIGN && firstAddr.SSID == WINLINK_STATION_ID) {
-                appLogger.log(`[App] Routing packet to WinLink Server (${RADIO_CALLSIGN}-${WINLINK_STATION_ID})`);
-                winlinkServer.processPacket(packet, radio);
-                processed = true;
-            }
-            
-            if (!processed) {
-                appLogger.log(`[App] Packet not addressed to any enabled server (dest: ${firstAddr.address}-${firstAddr.SSID})`);
-            }
-        }
-    } else {
-        appLogger.log(`[App] Received TNC data frame on channel ${frame.channel_id}${frame.channel_name ? ` (${frame.channel_name})` : ''}:`, frame.data);
-    }
-});
+// Data Broker Event-Driven Architecture:
+// - Radio.js dispatches 'DataFrame' events to the Data Broker
+// - FrameDeduplicator receives 'DataFrame' and emits 'UniqueDataFrame' for deduplicated frames
+// - Each handler module (APRS, BBS, Echo, WinLink) subscribes to 'UniqueDataFrame' 
+//   and processes packets they care about (based on channel_name or destination address)
+// - No direct routing needed in htstation.js - handlers self-register via DataBroker
 
-radio.on('rawCommand', (data) => {
-    //appLogger.log('[App] Received raw command data.');
-});
+// Set up Radio configuration and start connection
+const autoReconnectEnabled = config.BLUETOOTH_AUTO_RECONNECT !== 'false';
+radio.setAutoReconnectEnabled(autoReconnectEnabled);
+if (autoReconnectEnabled) {
+    appLogger.log('[App] Automatic Bluetooth reconnection enabled (15 second interval)');
+} else {
+    appLogger.log('[App] Automatic Bluetooth reconnection disabled by configuration');
+}
 
-radio.on('disconnected', () => {
-    appLogger.log('[App] Disconnected from radio.');
-});
-
-// Attempt to connect to the radio
+// Connect to the radio
 radio.connect(RADIO_MAC_ADDRESS)
     .then(() => {
+        appLogger.log('[App] Radio connected successfully');
+        
         // Publish Home Assistant MQTT Discovery configs
         if (mqttReporter && config.MQTT_TOPIC) {
             mqttReporter.publishAllDiscoveryConfigs();
@@ -351,3 +418,58 @@ radio.connect(RADIO_MAC_ADDRESS)
     .catch((err) => {
         console.error('Failed to connect:', err.message);
     });
+
+// === Handle Ctrl+C graceful shutdown ===
+process.on('SIGINT', () => {
+    appLogger.log('[App] Received SIGINT (Ctrl+C), shutting down...');
+    
+    // Dispose PacketStore to flush pending writes
+    if (packetStore) {
+        packetStore.dispose();
+    }
+    
+    // Stop web server
+    if (webServer) {
+        webServer.stop();
+    }
+    
+    // Disconnect radio
+    if (radio) {
+        radio.disconnect();
+    }
+    
+    // Disconnect MQTT
+    if (mqttReporter && mqttReporter.client) {
+        mqttReporter.client.end();
+    }
+    
+    appLogger.log('[App] Shutdown complete.');
+    process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+    appLogger.log('[App] Received SIGTERM, shutting down...');
+    
+    // Dispose PacketStore to flush pending writes
+    if (packetStore) {
+        packetStore.dispose();
+    }
+    
+    // Stop web server
+    if (webServer) {
+        webServer.stop();
+    }
+    
+    // Disconnect radio
+    if (radio) {
+        radio.disconnect();
+    }
+    
+    // Disconnect MQTT
+    if (mqttReporter && mqttReporter.client) {
+        mqttReporter.client.end();
+    }
+    
+    appLogger.log('[App] Shutdown complete.');
+    process.exit(0);
+});

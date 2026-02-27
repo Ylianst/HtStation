@@ -7,6 +7,9 @@ const crypto = require('crypto');
 const EventEmitter = require('events');
 const { AprsPacket } = require('./aprs/index.js');
 const Storage = require('./storage');
+const AX25Packet = require('./AX25Packet');
+const DataBroker = require('./utils/DataBroker');
+const DataBrokerClient = require('./utils/DataBrokerClient');
 
 class AprsHandler extends EventEmitter {
     constructor(config, radio, mqttReporter) {
@@ -42,6 +45,282 @@ class AprsHandler extends EventEmitter {
             logger.error('[APRS] Failed to initialize APRS message storage:', error);
             this.aprsMessageStorage = null;
         }
+        
+        // Write throttling for Raspberry Pi/MicroSD protection
+        // Limit file writes to at most once per minute
+        this.WRITE_THROTTLE_MS = 60000; // 60 seconds
+        this._pendingWrites = []; // Queue of pending write operations
+        this._lastWriteTime = 0;
+        this._writeTimer = null;
+        
+        // In-memory APRS frame history (matches C# implementation)
+        this._aprsFrames = [];
+        this.MAX_FRAME_HISTORY = 1000;
+        this._storeReady = false;
+
+        // Data Broker client for receiving UniqueDataFrame events
+        this._broker = new DataBrokerClient();
+        this._broker.subscribe(DataBroker.AllDevices, 'UniqueDataFrame', this._onUniqueDataFrame.bind(this));
+        
+        // Subscribe to PacketStoreReady to know when we can request historical packets
+        this._broker.subscribe(1, 'PacketStoreReady', this._onPacketStoreReady.bind(this));
+        
+        // Subscribe to PacketList to receive the list of historical packets
+        this._broker.subscribe(1, 'PacketList', this._onPacketList.bind(this));
+        
+        // Subscribe to SendAprsMessage events from the UI
+        this._broker.subscribe(1, 'SendAprsMessage', this._onSendAprsMessage.bind(this));
+        
+        // Subscribe to RequestAprsPackets to provide current packet list on-demand
+        this._broker.subscribe(1, 'RequestAprsPackets', this._onRequestAprsPackets.bind(this));
+        
+        // Load the next APRS message ID from the Data Broker (persisted across restarts)
+        this._nextAprsMessageId = this._broker.getValue(0, 'NextAprsMessageId', 1);
+        if (this._nextAprsMessageId < 1 || this._nextAprsMessageId > 999) {
+            this._nextAprsMessageId = 1;
+        }
+        
+        // Check if PacketStore is already ready (in case we're created after PacketStore)
+        if (this._broker.hasValue(1, 'PacketStoreReady')) {
+            // Request the packet list immediately
+            this._broker.dispatch(1, 'RequestPacketList', null, false);
+        } else {
+            // If no PacketStore or not ready after 2 seconds, mark as ready anyway
+            // This allows the web UI to get an empty list rather than waiting forever
+            setTimeout(() => {
+                if (!this._storeReady) {
+                    logger.log('[APRS] No PacketStore response, marking store as ready with empty history');
+                    this._storeReady = true;
+                    this._broker.dispatch(1, 'AprsStoreReady', true, false);
+                }
+            }, 2000);
+        }
+    }
+    
+    /**
+     * Gets the next APRS message ID, cycling from 1 to 999.
+     * Persists the value to the Data Broker for recovery across restarts.
+     * @returns {number} The next message ID.
+     */
+    _getNextAprsMessageId() {
+        const msgId = this._nextAprsMessageId++;
+        if (this._nextAprsMessageId > 999) {
+            this._nextAprsMessageId = 1;
+        }
+        this._broker.dispatch(0, 'NextAprsMessageId', this._nextAprsMessageId, true);
+        return msgId;
+    }
+    
+    /**
+     * Handle PacketStoreReady event by requesting the packet list.
+     */
+    _onPacketStoreReady(deviceId, name, data) {
+        if (this._storeReady) return; // Already processed
+        
+        // Request the packet list from PacketStore
+        this._broker.dispatch(1, 'RequestPacketList', null, false);
+    }
+    
+    /**
+     * Handle PacketList event by parsing all historical APRS packets.
+     */
+    _onPacketList(deviceId, name, packets) {
+        if (this._storeReady) return; // Already processed
+        if (!Array.isArray(packets)) return;
+        
+        logger.log(`[APRS] Loading ${packets.length} historical packets from PacketStore`);
+        
+        // Parse all historical packets from the APRS channel
+        for (const frame of packets) {
+            // Only process frames from the APRS channel
+            if (frame.channel_name !== 'APRS') continue;
+            
+            // Decode the frame as AX.25
+            const ax25Packet = AX25Packet.decodeAX25Packet(frame);
+            if (!ax25Packet) continue;
+            
+            // Only process UI frames (used by APRS)
+            if (ax25Packet.type !== 3) continue; // 3 = UI frame
+            
+            // Parse the APRS packet
+            const aprsInput = {
+                dataStr: ax25Packet.dataStr,
+                addresses: ax25Packet.addresses
+            };
+            const aprsPacket = AprsPacket.parse(aprsInput);
+            if (!aprsPacket) continue;
+            
+            // Add to in-memory history
+            this._aprsFrames.push({
+                aprsPacket,
+                ax25Packet,
+                frame,
+                timestamp: frame.time || Date.now()
+            });
+        }
+        
+        // Trim to max size
+        while (this._aprsFrames.length > this.MAX_FRAME_HISTORY) {
+            this._aprsFrames.shift();
+        }
+        
+        // Mark as ready
+        this._storeReady = true;
+        
+        logger.log(`[APRS] Loaded ${this._aprsFrames.length} APRS packets from history`);
+        
+        // Notify subscribers that AprsHandler is ready with historical data
+        this._broker.dispatch(1, 'AprsStoreReady', true, false);
+    }
+    
+    /**
+     * Handle RequestAprsPackets events to provide the current packet list on-demand.
+     */
+    _onRequestAprsPackets(deviceId, name, data) {
+        // Always respond with the current packet list (may be empty if not ready)
+        logger.log(`[APRS] RequestAprsPackets received, returning ${this._aprsFrames.length} packets`);
+        this._broker.dispatch(1, 'AprsPacketList', [...this._aprsFrames], false);
+    }
+    
+    /**
+     * Handle SendAprsMessage events from the UI to transmit APRS messages.
+     */
+    _onSendAprsMessage(deviceId, name, messageData) {
+        if (!messageData || !messageData.destination || !messageData.message) {
+            logger.error('[APRS] Invalid SendAprsMessage data');
+            return;
+        }
+        
+        const destination = messageData.destination;
+        const message = messageData.message;
+        const route = messageData.route || null;
+        
+        // Use the sendMessage method which handles authentication and retry logic
+        const requiresAuth = this.requiresAuthentication(destination);
+        this.sendMessage(destination, message, requiresAuth);
+    }
+
+    /**
+     * Handle UniqueDataFrame events from the Data Broker.
+     * This replaces the direct call from htstation.js
+     */
+    _onUniqueDataFrame(deviceId, name, frame) {
+        if (!frame || !frame.data) return;
+
+        // Attempt to decode AX.25 packet
+        const packet = AX25Packet.decodeAX25Packet(frame);
+        if (!packet) return;
+
+        // Check if this packet is from the APRS channel
+        if (packet.channel_name === 'APRS') {
+            this.processAprsPacket(packet);
+        }
+    }
+
+    /**
+     * Dispose the handler, cleaning up broker subscriptions.
+     */
+    dispose() {
+        // Clear write timer
+        if (this._writeTimer) {
+            clearTimeout(this._writeTimer);
+            this._writeTimer = null;
+        }
+        
+        // Flush any pending writes before disposing
+        this._flushPendingWrites();
+        
+        if (this._broker) {
+            this._broker.dispose();
+            this._broker = null;
+        }
+        
+        // Clear outgoing message timers
+        for (const [key, entry] of this.aprsOutgoingQueue) {
+            if (entry.timer) {
+                clearTimeout(entry.timer);
+            }
+        }
+        this.aprsOutgoingQueue.clear();
+    }
+    
+    /**
+     * Queue a write operation for throttled execution.
+     * Writes are batched and executed at most once per minute to protect MicroSD cards.
+     * @param {string} storageKey - The storage key
+     * @param {object} record - The record to save
+     */
+    _queueThrottledWrite(storageKey, record) {
+        // Add to pending writes queue
+        this._pendingWrites.push({ key: storageKey, record });
+        
+        const now = Date.now();
+        const timeSinceLastWrite = now - this._lastWriteTime;
+        
+        // If enough time has passed since last write, flush immediately
+        if (timeSinceLastWrite >= this.WRITE_THROTTLE_MS) {
+            this._flushPendingWrites();
+        } else if (!this._writeTimer) {
+            // Schedule a flush for when the throttle period ends
+            const timeUntilNextWrite = this.WRITE_THROTTLE_MS - timeSinceLastWrite;
+            this._writeTimer = setTimeout(() => {
+                this._writeTimer = null;
+                this._flushPendingWrites();
+            }, timeUntilNextWrite);
+        }
+    }
+    
+    /**
+     * Flush all pending writes to storage.
+     */
+    _flushPendingWrites() {
+        if (!this.aprsMessageStorage || this._pendingWrites.length === 0) {
+            return;
+        }
+        
+        const writesToFlush = this._pendingWrites;
+        this._pendingWrites = [];
+        this._lastWriteTime = Date.now();
+        
+        logger.log(`[APRS Storage] Flushing ${writesToFlush.length} pending writes to disk`);
+        
+        // Batch write all pending records
+        for (const write of writesToFlush) {
+            try {
+                this.aprsMessageStorage.save(write.key, write.record);
+            } catch (error) {
+                logger.error(`[APRS Storage] Failed to write ${write.key}:`, error);
+            }
+        }
+        
+        // Cleanup old messages after batch write
+        this.cleanupOldAprsMessages();
+    }
+    
+    /**
+     * Add an APRS frame to in-memory history and dispatch via DataBroker.
+     * @param {object} aprsPacket - Parsed APRS packet
+     * @param {object} ax25Packet - Underlying AX.25 packet
+     * @param {object} frame - Original TNC data fragment (can be null for sent packets)
+     */
+    _addToFrameHistory(aprsPacket, ax25Packet, frame) {
+        const frameEntry = {
+            aprsPacket,
+            ax25Packet,
+            frame,
+            timestamp: Date.now()
+        };
+        
+        // Add to in-memory history
+        this._aprsFrames.push(frameEntry);
+        
+        // Trim to max size
+        while (this._aprsFrames.length > this.MAX_FRAME_HISTORY) {
+            this._aprsFrames.shift();
+        }
+        
+        // Dispatch AprsFrame event via DataBroker (for UI updates)
+        this._broker.dispatch(1, 'AprsFrame', frameEntry, false);
     }
     
     // Initialize station authentication table from config
@@ -272,29 +551,25 @@ class AprsHandler extends EventEmitter {
             // Use timestamp as key for natural sorting (newest first when sorted in reverse)
             const storageKey = `aprs-msg-${now.getTime()}`;
             
-            if (this.aprsMessageStorage.save(storageKey, messageRecord)) {
-                logger.log(`[APRS Storage] Stored ${aprsPacket.dataType} from ${sourceCallsign} > ${destinationCallsign}: "${messageText}"`);
-                
-                // Emit event for real-time WebSocket broadcast
-                this.emit('aprsMessageReceived', {
-                    source: sourceCallsign,
-                    destination: destinationCallsign,
-                    message: messageText,
-                    dataType: aprsPacket.dataType,
-                    direction: 'received',
-                    timestamp: timestamp,
-                    localTime: localTime,
-                    position: positionData,
-                    weather: weatherData
-                });
-                
-                // Maintain message limit
-                this.cleanupOldAprsMessages();
-                return true;
-            } else {
-                logger.error(`[APRS Storage] Failed to store ${aprsPacket.dataType} from ${sourceCallsign}`);
-                return false;
-            }
+            // Queue for throttled write (at most once per minute for Raspberry Pi/MicroSD protection)
+            this._queueThrottledWrite(storageKey, messageRecord);
+            
+            logger.log(`[APRS Storage] Queued ${aprsPacket.dataType} from ${sourceCallsign} > ${destinationCallsign}: "${messageText}"`);
+            
+            // Emit event for real-time WebSocket broadcast
+            this.emit('aprsMessageReceived', {
+                source: sourceCallsign,
+                destination: destinationCallsign,
+                message: messageText,
+                dataType: aprsPacket.dataType,
+                direction: 'received',
+                timestamp: timestamp,
+                localTime: localTime,
+                position: positionData,
+                weather: weatherData
+            });
+            
+            return true;
         } catch (error) {
             logger.error('[APRS Storage] Error storing APRS data:', error);
             return false;
@@ -590,8 +865,10 @@ class AprsHandler extends EventEmitter {
             
             const storageKey = `aprs-msg-${now.getTime()}`;
             
-        if (this.aprsMessageStorage.save(storageKey, messageRecord)) {
-            logger.log(`[APRS Storage] Stored sent message to ${destinationCallsign}: "${messageText}"`);
+            // Queue for throttled write (at most once per minute for Raspberry Pi/MicroSD protection)
+            this._queueThrottledWrite(storageKey, messageRecord);
+            
+            logger.log(`[APRS Storage] Queued sent message to ${destinationCallsign}: "${messageText}"`);
             
             // Emit event for real-time WebSocket broadcast
             this.emit('aprsMessageReceived', {
@@ -606,10 +883,7 @@ class AprsHandler extends EventEmitter {
                 weather: null
             });
             
-            this.cleanupOldAprsMessages();
             return true;
-            }
-            return false;
         } catch (error) {
             logger.error('[APRS Storage] Error storing sent message:', error);
             return false;
@@ -849,6 +1123,9 @@ class AprsHandler extends EventEmitter {
                     }
                 }
 
+                // Add to in-memory frame history and dispatch AprsFrame event via DataBroker
+                this._addToFrameHistory(aprsPacket, packet, null);
+                
                 // Store ALL APRS messages for BBS retrieval (regardless of type)
                 this.storeAllAprsData(aprsPacket, packet);
                 

@@ -3,7 +3,7 @@
 const EventEmitter = require('events');
 const fs = require('fs');
 const path = require('path');
-const AX25Packet = require('./AX25Packet');
+const AX25Packet = require('../AX25Packet');
 
 /**
  * YAPP (Yet Another Protocol for Packet) Implementation

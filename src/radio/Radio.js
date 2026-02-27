@@ -7,8 +7,10 @@ const logger = global.logger ? global.logger.getLogger('Radio') : console;
 
 const { EventEmitter } = require('events');
 const GaiaClient = require('./GaiaClient.js');
-const { getShort, getInt, bytesToHex, intToBytes } = require('./utils');
+const { getShort, getInt, bytesToHex, intToBytes } = require('../utils');
 const RadioCodec = require('./RadioCodec');
+const DataBroker = require('../utils/DataBroker');
+const DataBrokerClient = require('../utils/DataBrokerClient');
 
 // Enum-like objects for commands and states
 const RadioCommandGroup = {
@@ -277,6 +279,8 @@ class Radio extends EventEmitter {
     _tncOutboundQueue = [];
     _tncSending = false;
     _tncPendingPacket = null; // Packet currently being transmitted (not yet confirmed)
+    _tncCurrentFrameData = null; // Complete frame data being transmitted (for dispatch when all fragments sent)
+    _tncCurrentFrameChannelId = -1; // Channel ID for current frame
 
     /**
      * Send a TNC frame (AX.25 packet) over Bluetooth, fragmenting as needed.
@@ -301,18 +305,26 @@ class Radio extends EventEmitter {
         let offset = 0;
         let fragment_id = 0;
         const totalLen = data.length;
+        
+        // Store the complete frame data for dispatch when all fragments are sent
+        this._tncCurrentFrameData = data;
+        this._tncCurrentFrameChannelId = channel_id;
+        
         while (offset < totalLen) {
             const remaining = totalLen - offset;
             const fragLen = Math.min(remaining, MAX_MTU);
             const fragData = data.slice(offset, offset + fragLen);
             let flags = fragment_id & 0x3F;
-            if (offset + fragLen >= totalLen) flags |= 0x80; // final fragment
+            const isFinal = (offset + fragLen >= totalLen);
+            if (isFinal) flags |= 0x80; // final fragment
             flags |= 0x40; // with_channel_id
             const packet = Buffer.concat([
                 Buffer.from([flags]),
                 fragData,
                 Buffer.from([channel_id])
             ]);
+            // Mark packet with isFinal flag for dispatch logic
+            packet.isFinalFragment = isFinal;
             //logger.log(`[Radio] Queued TNC frame for send: ${bytesToHex(packet)}`);
             this._tncOutboundQueue.push(packet);
             offset += fragLen;
@@ -369,12 +381,14 @@ class Radio extends EventEmitter {
     }
 
     /**
-     * @param {string} macAddress
+     * @param {number} deviceId - The device ID for the Data Broker.
+     * @param {string} macAddress - The Bluetooth MAC address of the radio.
      * @param {object} [options]
      * @param {boolean} [options.loadChannels=true] - Whether to load channel info on connect
      */
-    constructor(macAddress, options = {}) {
+    constructor(deviceId, macAddress, options = {}) {
         super();
+        this.deviceId = deviceId;
         this.macAddress = macAddress;
         this.loadChannels = options.loadChannels !== undefined ? options.loadChannels : true;
         this._tncFrameAccumulator = null;
@@ -396,13 +410,44 @@ class Radio extends EventEmitter {
         this._reconnectInterval = 15000; // 15 seconds
         this._autoReconnectEnabled = false;
         this._isManualDisconnect = false;
+
+        // Lock state management
+        this.lockState = null;
+        this._savedRegionId = -1;
+        this._savedChannelId = -1;
+        this._savedScan = false;
+        this._savedDualWatch = 0;
+
+        // Clear channel timer
+        this._clearChannelTimer = null;
+        this._nextMinFreeChannelTime = null;
+        this._nextChannelTimeRandomMS = 800;
+
+        // Data Broker client for software bus architecture
+        this.broker = new DataBrokerClient();
+
+        // Subscribe to incoming broker events
+        this.broker.subscribe(deviceId, ['ChannelChangeVfoA', 'ChannelChangeVfoB'], this._onChannelChangeEvent.bind(this));
+        this.broker.subscribe(deviceId, ['WriteSettings', 'SetRegion', 'DualWatch', 'Scan', 'SetGPS', 'Region'], this._onSettingsChangeEvent.bind(this));
+        this.broker.subscribe(deviceId, 'WriteChannel', this._onWriteChannelEvent.bind(this));
+        this.broker.subscribe(deviceId, 'GetPosition', this._onGetPositionEvent.bind(this));
+        this.broker.subscribe(deviceId, 'TransmitDataFrame', this._onTransmitDataFrameEvent.bind(this));
+        this.broker.subscribe(deviceId, 'SetBssSettings', this._onSetBssSettingsEvent.bind(this));
+        this.broker.subscribe(deviceId, 'SetLock', this._onSetLockEvent.bind(this));
+        this.broker.subscribe(deviceId, 'SetUnlock', this._onSetUnlockEvent.bind(this));
+        this.broker.subscribe(deviceId, 'SetAudio', this._onSetAudioEvent.bind(this));
+        this.broker.subscribe(deviceId, 'SetVolumeLevel', this._onSetVolumeLevelEvent.bind(this));
+        this.broker.subscribe(deviceId, 'SetSquelchLevel', this._onSetSquelchLevelEvent.bind(this));
     }
     /**
      * Updates the internal state of the radio.
      * @param {number} newState - The new state value.
      */
     updateState(newState) {
+        if (this.state === newState) return;
         this.state = newState;
+        this.broker.dispatch(this.deviceId, 'State', newState);
+        this._debug('State changed to: ' + newState);
     }
     /**
      * Connects to the radio using the provided MAC address.
@@ -487,6 +532,7 @@ class Radio extends EventEmitter {
         // Always request settings and BSS settings
         this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.READ_SETTINGS, null);
         this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.READ_BSS_SETTINGS, null);
+        this.requestPowerStatus('BATTERY_LEVEL_AS_PERCENTAGE');
     }
 
     onDisconnected() {
@@ -497,6 +543,39 @@ class Radio extends EventEmitter {
             clearInterval(this.gpsLockTimer);
             this.gpsLockTimer = null;
         }
+
+        // Dispatch null values through the Data Broker to notify subscribers of disconnection
+        this.broker.dispatch(this.deviceId, 'Info', null);
+        this.broker.dispatch(this.deviceId, 'Channels', null);
+        this.broker.dispatch(this.deviceId, 'HtStatus', null);
+        this.broker.dispatch(this.deviceId, 'Settings', null);
+        this.broker.dispatch(this.deviceId, 'BssSettings', null);
+        this.broker.dispatch(this.deviceId, 'Position', null);
+        this.broker.dispatch(this.deviceId, 'AllChannelsLoaded', false);
+        this.broker.dispatch(this.deviceId, 'GpsEnabled', false);
+        this.broker.dispatch(this.deviceId, 'LockState', null);
+        this.broker.dispatch(this.deviceId, 'Volume', 0);
+        this.broker.dispatch(this.deviceId, 'BatteryAsPercentage', 0);
+        this.broker.dispatch(this.deviceId, 'BatteryLevel', 0);
+        this.broker.dispatch(this.deviceId, 'BatteryVoltage', 0);
+        this.broker.dispatch(this.deviceId, 'RcBatteryLevel', 0);
+
+        // Clear local state
+        this.info = null;
+        this.channels = null;
+        this.htStatus = null;
+        this.settings = null;
+        this.bssSettings = null;
+        this.position = null;
+        this._tncFrameAccumulator = null;
+        this._tncOutboundQueue = [];
+        this._tncSending = false;
+        this._tncPendingPacket = null;
+        this.lockState = null;
+        this.gpsEnabled = false;
+
+        // Delete device data from broker
+        DataBroker.deleteDevice(this.deviceId);
         
         // Start auto-reconnection if enabled and not a manual disconnect
         if (this._autoReconnectEnabled && !this._isManualDisconnect) {
@@ -506,11 +585,13 @@ class Radio extends EventEmitter {
 
     onDebugMessage(msg) {
         this.emit('debugMessage', msg);
+        this.broker.dispatch(1, 'LogInfo', msg, false);
     }
 
     onReceivedData(value) {
         //logger.log(`[Radio] Received data: ${bytesToHex(value)}`);
         this.emit('rawCommand', value);
+        this.broker.dispatch(this.deviceId, 'RawCommand', value, false);
 
         const commandGroup = getShort(value, 0);
         if (commandGroup === RadioCommandGroup.BASIC) {
@@ -530,9 +611,17 @@ class Radio extends EventEmitter {
                     logger.log(`[Radio] HT_SEND_DATA response: errorCode=${errorCode} (${errorName})`);
                     
                     if (errorCode === RadioCommandErrors.SUCCESS) {
-                        // Packet sent successfully - remove from queue
+                        // Packet sent successfully
                         if (this._tncPendingPacket && this._tncOutboundQueue.length > 0) {
-                            this._tncOutboundQueue.shift(); // Remove the successfully sent packet
+                            const sentPacket = this._tncOutboundQueue.shift(); // Remove the successfully sent packet
+                            
+                            // Only dispatch the complete frame when the FINAL fragment is confirmed
+                            if (sentPacket.isFinalFragment && this._tncCurrentFrameData) {
+                                this._dispatchOutboundFrame(this._tncCurrentFrameData, this._tncCurrentFrameChannelId);
+                                this._tncCurrentFrameData = null;
+                                this._tncCurrentFrameChannelId = -1;
+                            }
+                            
                             this._tncPendingPacket = null;
                         }
                         this._tncSending = false;
@@ -566,7 +655,15 @@ class Radio extends EventEmitter {
                     this.info = RadioCodec.decodeDevInfo(value);
                     this.updateState(RadioState.CONNECTED);
                     this.emit('infoUpdate', { type: 'Info', value: this.info });
+                    this.broker.dispatch(this.deviceId, 'Info', this.info);
+                    // Publish initial GPS enabled state
+                    this.broker.dispatch(this.deviceId, 'GpsEnabled', this.gpsEnabled);
+                    // Channels are not loaded yet
+                    this.broker.dispatch(this.deviceId, 'AllChannelsLoaded', false);
                     this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.REGISTER_NOTIFICATION, RadioNotification.HT_STATUS_CHANGED);
+                    if (this.gpsEnabled) {
+                        this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.REGISTER_NOTIFICATION, RadioNotification.POSITION_CHANGE);
+                    }
                     // Only request channels if loadChannels is true
                     if (this.loadChannels && this.info && typeof this.info.channel_count === 'number') {
                         this.channels = new Array(this.info.channel_count);
@@ -581,6 +678,7 @@ class Radio extends EventEmitter {
                     // Decode BSS settings using the C# logic
                     this.bssSettings = RadioCodec.decodeBssSettings(value);
                     this.emit('infoUpdate', { type: 'BssSettings', value: this.bssSettings });
+                    this.broker.dispatch(this.deviceId, 'BssSettings', this.bssSettings);
                     break;
                 case RadioBasicCommand.READ_RF_CH:
                     // Decode channel info and store in channels array
@@ -594,6 +692,8 @@ class Radio extends EventEmitter {
                             // Only emit when all channels are loaded
                             if (this.channels.every(ch => ch)) {
                                 this.emit('infoUpdate', { type: 'AllChannelsLoaded', value: this.channels });
+                                this.broker.dispatch(this.deviceId, 'Channels', this.channels);
+                                this.broker.dispatch(this.deviceId, 'AllChannelsLoaded', true);
                             }
                         }
                     }
@@ -602,6 +702,7 @@ class Radio extends EventEmitter {
                     // Decode radio settings using the C# logic
                     this.settings = RadioCodec.decodeRadioSettings(value);
                     this.emit('infoUpdate', { type: 'Settings', value: this.settings });
+                    this.broker.dispatch(this.deviceId, 'Settings', this.settings);
                     break;
                 case RadioBasicCommand.READ_STATUS: {
                     // Battery status decoding (C# logic port)
@@ -611,21 +712,25 @@ class Radio extends EventEmitter {
                             case 1: // BATTERY_LEVEL
                                 const batteryLevel = value[7];
                                 this.emit('infoUpdate', { type: 'BatteryLevel', value: batteryLevel });
+                                this.broker.dispatch(this.deviceId, 'BatteryLevel', batteryLevel);
                                 logger.log(`[Radio] BatteryLevel: ${batteryLevel}`);
                                 break;
                             case 2: // BATTERY_VOLTAGE
                                 const batteryVoltage = getShort(value, 7) / 1000;
                                 this.emit('infoUpdate', { type: 'BatteryVoltage', value: batteryVoltage });
+                                this.broker.dispatch(this.deviceId, 'BatteryVoltage', batteryVoltage);
                                 logger.log(`[Radio] BatteryVoltage: ${batteryVoltage}`);
                                 break;
                             case 3: // RC_BATTERY_LEVEL
                                 const rcBatteryLevel = value[7];
                                 this.emit('infoUpdate', { type: 'RcBatteryLevel', value: rcBatteryLevel });
+                                this.broker.dispatch(this.deviceId, 'RcBatteryLevel', rcBatteryLevel);
                                 logger.log(`[Radio] RcBatteryLevel: ${rcBatteryLevel}`);
                                 break;
                             case 4: // BATTERY_LEVEL_AS_PERCENTAGE
                                 const batteryPercent = value[7];
                                 this.emit('infoUpdate', { type: 'BatteryAsPercentage', value: batteryPercent });
+                                this.broker.dispatch(this.deviceId, 'BatteryAsPercentage', batteryPercent);
                                 //logger.log(`[Radio] BatteryAsPercentage: ${batteryPercent}`);
                                 break;
                             default:
@@ -639,16 +744,32 @@ class Radio extends EventEmitter {
                     const notificationType = payload[0];
                     //logger.log(`[Radio] Received notification: ${Object.keys(RadioNotification).find(key => RadioNotification[key] === notificationType)}`);
                     switch (notificationType) {
-                        case RadioNotification.HT_STATUS_CHANGED:
+                        case RadioNotification.HT_STATUS_CHANGED: {
                             // Decode HT status using the C# logic
+                            const oldRegion = this.htStatus ? this.htStatus.curr_region : -1;
                             this.htStatus = RadioCodec.decodeHtStatus(value);
                             this.emit('infoUpdate', { type: 'HtStatus', value: this.htStatus });
+                            this.broker.dispatch(this.deviceId, 'HtStatus', this.htStatus);
+
+                            // Handle region change - reload channels
+                            if (this.htStatus && oldRegion !== -1 && oldRegion !== this.htStatus.curr_region) {
+                                this.broker.dispatch(this.deviceId, 'RegionChange', null, false);
+                                this.broker.dispatch(this.deviceId, 'AllChannelsLoaded', false);
+                                if (this.channels) {
+                                    this.channels = new Array(this.channels.length);
+                                    this.broker.dispatch(this.deviceId, 'Channels', this.channels);
+                                }
+                                this._updateChannels();
+                            }
+
                             this._processTncQueue();
                             break;
+                        }
                         case RadioNotification.HT_SETTINGS_CHANGED:
                             // Decode HT settings using the C# logic
                             this.settings = RadioCodec.decodeRadioSettings(value);
                             this.emit('infoUpdate', { type: 'Settings', value: this.settings });
+                            this.broker.dispatch(this.deviceId, 'Settings', this.settings);
                             break;
                         case RadioNotification.DATA_RXD:
                             // Decode TNC data fragment
@@ -721,9 +842,16 @@ class Radio extends EventEmitter {
                                 const packet = Object.assign({}, this._tncFrameAccumulator);
                                 packet.incoming = true;
                                 packet.time = new Date();
+
+                                // Populate usage field if radio is locked and data received on locked channel
+                                if (this.lockState && this.lockState.isLocked && packet.channel_id === this.lockState.channelId) {
+                                    packet.usage = this.lockState.usage;
+                                }
+
                                 this._tncFrameAccumulator = null;
                                 this._tncExpectedFragmentId = 0;
                                 this.emit('data', packet);
+                                this._dispatchDataFrame(packet);
                             }
                             break;
                         case RadioNotification.POSITION_CHANGE:
@@ -738,6 +866,10 @@ class Radio extends EventEmitter {
                             this.position.locked = (this.gpsLock === 0);
                             logger.log(`[Radio] GPS Position update - Locked: ${this.position.locked}, Lat: ${this.position.latitude}, Lng: ${this.position.longitude}`);
                             this.emit('positionUpdate', this.position);
+                            // Only dispatch position if GPS is enabled
+                            if (this.gpsEnabled) {
+                                this.broker.dispatch(this.deviceId, 'Position', this.position);
+                            }
                             break;
                         default:
                             logger.warn(`[Radio] Unhandled notification type: ${notificationType}`);
@@ -746,6 +878,7 @@ class Radio extends EventEmitter {
                 case RadioBasicCommand.GET_VOLUME:
                     this.volume = payload[1];
                     this.emit('infoUpdate', { type: 'Volume', value: this.volume });
+                    this.broker.dispatch(this.deviceId, 'Volume', this.volume);
                     break;
                 default:
                     logger.warn(`[Radio] Unhandled basic command: ${command}`);
@@ -833,6 +966,9 @@ class Radio extends EventEmitter {
         if (this.gpsEnabled === enabled) return;
         
         this.gpsEnabled = enabled;
+
+        // Publish the GPS enabled state to the broker
+        this.broker.dispatch(this.deviceId, 'GpsEnabled', this.gpsEnabled);
         
         if (this.state === RadioState.CONNECTED) {
             this.gpsLock = 2; // Reset GPS lock status
@@ -855,6 +991,10 @@ class Radio extends EventEmitter {
             } else {
                 logger.log('[Radio] Disabling GPS position notifications');
                 this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.CANCEL_NOTIFICATION, RadioNotification.POSITION_CHANGE);
+
+                // Dispatch a null Position to clear the marker
+                this.position = null;
+                this.broker.dispatch(this.deviceId, 'Position', null);
             }
         }
     }
@@ -1083,12 +1223,364 @@ class Radio extends EventEmitter {
             this._reconnectTimer = null;
         }
         
+        // Clear the channel timer
+        if (this._clearChannelTimer) {
+            clearTimeout(this._clearChannelTimer);
+            this._clearChannelTimer = null;
+        }
+        
         // Disconnect the underlying client if connected
         if (this.gaiaClient && this.state === RadioState.CONNECTED) {
             this.gaiaClient.disconnect();
         } else {
             // If not connected, just update state
             this.updateState(RadioState.DISCONNECTED);
+        }
+    }
+
+    // ── Data Broker Dispatch Helpers ────────────────────────────────────────
+
+    /**
+     * Log a debug message via the Data Broker (device 1, LogInfo, broadcast only).
+     * @param {string} msg
+     */
+    _debug(msg) {
+        this.broker.dispatch(1, 'LogInfo', `[Radio/${this.deviceId}]: ${msg}`, false);
+    }
+
+    /**
+     * Dispatch a data frame via the Data Broker.
+     * @param {object} frame
+     */
+    _dispatchDataFrame(frame) {
+        frame.radioMac = this.macAddress;
+        frame.radioDeviceId = this.deviceId;
+        this.broker.dispatch(this.deviceId, 'DataFrame', frame, false);
+    }
+
+    /**
+     * Dispatch an outbound frame via the Data Broker.
+     * Called when all fragments of a TNC frame have been successfully transmitted.
+     * @param {Buffer} completeData - The complete frame data (not a fragment)
+     * @param {number} channelId - The channel ID the frame was sent on
+     */
+    _dispatchOutboundFrame(completeData, channelId) {
+        if (!completeData || completeData.length === 0) return;
+
+        // Get channel name
+        let channelName = String(channelId);
+        if (channelId >= 254) {
+            channelName = 'NOAA';
+        } else if (this.loadChannels && this.channels && this.channels[channelId] && this.channels[channelId].name_str) {
+            channelName = this.channels[channelId].name_str;
+        }
+
+        const frame = {
+            time: new Date(),
+            incoming: false,
+            data: completeData,
+            channel_id: channelId,
+            channel_name: channelName,
+            radioMac: this.macAddress,
+            radioDeviceId: this.deviceId
+        };
+
+        this.broker.dispatch(this.deviceId, 'DataFrame', frame, false);
+    }
+
+    // ── Channel Helpers ────────────────────────────────────────────────────
+
+    /**
+     * Reload all channels from the radio (used after region change).
+     */
+    _updateChannels() {
+        if (this.state !== RadioState.CONNECTED || !this.info) return;
+        for (let i = 0; i < this.info.channel_count; i++) {
+            this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.READ_RF_CH, i);
+        }
+    }
+
+    /**
+     * Returns the channel name for a given channel ID.
+     * @param {number} channelId
+     * @returns {string}
+     */
+    _getChannelNameById(channelId) {
+        if (channelId >= 254) return 'NOAA';
+        if (this.channels && channelId < this.channels.length && this.channels[channelId]) {
+            return this.channels[channelId].name_str || '';
+        }
+        return '';
+    }
+
+    // ── Data Broker Incoming Event Handlers ────────────────────────────────
+
+    /**
+     * Handles ChannelChangeVfoA / ChannelChangeVfoB events from the broker.
+     */
+    _onChannelChangeEvent(deviceId, name, data) {
+        if (deviceId !== this.deviceId) return;
+        if (!this.settings) return;
+        // Ignore channel changes when radio is locked
+        if (this.lockState) return;
+
+        const channelId = data;
+        switch (name) {
+            case 'ChannelChangeVfoA':
+                this.writeSettings(channelId, this.settings.channel_b,
+                    this.settings.double_channel, this.settings.scan, this.settings.squelch_level);
+                break;
+            case 'ChannelChangeVfoB':
+                this.writeSettings(this.settings.channel_a, channelId,
+                    this.settings.double_channel, this.settings.scan, this.settings.squelch_level);
+                break;
+        }
+    }
+
+    /**
+     * Handles WriteSettings, SetRegion, DualWatch, Scan, SetGPS, Region events.
+     */
+    _onSettingsChangeEvent(deviceId, name, data) {
+        if (deviceId !== this.deviceId) return;
+
+        switch (name) {
+            case 'WriteSettings':
+                // Ignore when locked
+                if (this.lockState) return;
+                if (Buffer.isBuffer(data) || data instanceof Uint8Array) {
+                    this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.WRITE_SETTINGS, data);
+                }
+                break;
+            case 'SetRegion':
+            case 'Region':
+                if (this.lockState) return;
+                if (typeof data === 'number') {
+                    this.setRegion(data);
+                }
+                break;
+            case 'SetGPS':
+                if (typeof data === 'boolean') {
+                    this.setGpsEnabled(data);
+                }
+                break;
+            case 'DualWatch':
+                if (this.lockState) return;
+                if (this.settings && typeof data === 'boolean') {
+                    const newDualWatch = data ? 1 : 0;
+                    this.writeSettings(this.settings.channel_a, this.settings.channel_b,
+                        newDualWatch, this.settings.scan, this.settings.squelch_level);
+                }
+                break;
+            case 'Scan':
+                if (this.lockState) return;
+                if (this.settings && typeof data === 'boolean') {
+                    this.writeSettings(this.settings.channel_a, this.settings.channel_b,
+                        this.settings.double_channel, data, this.settings.squelch_level);
+                }
+                break;
+        }
+    }
+
+    /**
+     * Handles WriteChannel event from the broker.
+     */
+    _onWriteChannelEvent(deviceId, name, data) {
+        if (deviceId !== this.deviceId) return;
+        if (data && typeof data.toByteArray === 'function') {
+            this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.WRITE_RF_CH, data.toByteArray());
+        }
+    }
+
+    /**
+     * Handles GetPosition event from the broker.
+     */
+    _onGetPositionEvent(deviceId, name, data) {
+        if (deviceId !== this.deviceId) return;
+        this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.GET_POSITION, null);
+    }
+
+    /**
+     * Handles TransmitDataFrame event from the broker.
+     */
+    _onTransmitDataFrameEvent(deviceId, name, data) {
+        if (deviceId !== this.deviceId) return;
+        if (!data) return;
+
+        if (data.packet) {
+            // AX.25 packet transmission
+            const channelId = (data.channelId >= 0) ? data.channelId : -1;
+            const opts = {
+                channel_id: channelId >= 0 ? channelId : (this.settings ? this.settings.channel_a : 0),
+                data: data.packet.toByteArray ? data.packet.toByteArray() : data.packet
+            };
+            this.sendTncFrame(opts);
+        }
+    }
+
+    /**
+     * Handles SetBssSettings event from the broker.
+     */
+    _onSetBssSettingsEvent(deviceId, name, data) {
+        if (deviceId !== this.deviceId) return;
+        if (data && typeof data.toByteArray === 'function') {
+            this.sendCommand(RadioCommandGroup.BASIC, RadioBasicCommand.WRITE_BSS_SETTINGS, data.toByteArray());
+        }
+    }
+
+    /**
+     * Handles SetLock event from the broker to lock the radio to a specific channel/region.
+     */
+    _onSetLockEvent(deviceId, name, data) {
+        if (deviceId !== this.deviceId) return;
+        if (!data) return;
+        // Ignore if already locked
+        if (this.lockState) return;
+        if (!this.settings || !this.htStatus) return;
+
+        // Save current state
+        this._savedRegionId = this.htStatus.curr_region;
+        this._savedChannelId = this.settings.channel_a;
+        this._savedScan = this.settings.scan;
+        this._savedDualWatch = this.settings.double_channel;
+
+        const targetRegionId = (data.regionId >= 0) ? data.regionId : this.htStatus.curr_region;
+        const targetChannelId = (data.channelId >= 0) ? data.channelId : this.settings.channel_a;
+
+        this.lockState = {
+            isLocked: true,
+            usage: data.usage,
+            regionId: targetRegionId,
+            channelId: targetChannelId
+        };
+
+        this.broker.dispatch(this.deviceId, 'LockState', this.lockState);
+        this._debug(`Radio locked for usage '${data.usage}' - Region: ${targetRegionId}, Channel: ${targetChannelId}`);
+
+        // Apply lock: change region if needed, then disable scan/dual-watch and set channel
+        if (targetRegionId !== this.htStatus.curr_region) {
+            this.setRegion(targetRegionId);
+        }
+        this.writeSettings(targetChannelId, this.settings.channel_b, 0, false, this.settings.squelch_level);
+    }
+
+    /**
+     * Handles SetUnlock event from the broker to restore previous settings.
+     */
+    _onSetUnlockEvent(deviceId, name, data) {
+        if (deviceId !== this.deviceId) return;
+        if (!data) return;
+        if (!this.lockState) return;
+        if (this.lockState.usage !== data.usage) return;
+        if (!this.settings) return;
+
+        this._debug(`Radio unlocked from usage '${data.usage}' - Restoring previous settings`);
+
+        // Restore previous region if different
+        if (this.htStatus && this._savedRegionId !== this.htStatus.curr_region && this._savedRegionId >= 0) {
+            this.setRegion(this._savedRegionId);
+        }
+
+        // Restore previous settings
+        this.writeSettings(this._savedChannelId, this.settings.channel_b,
+            this._savedDualWatch, this._savedScan, this.settings.squelch_level);
+
+        this.lockState = null;
+        this.broker.dispatch(this.deviceId, 'LockState', {
+            isLocked: false, usage: null, regionId: -1, channelId: -1
+        });
+    }
+
+    /**
+     * Handles SetAudio event from the broker.
+     */
+    _onSetAudioEvent(deviceId, name, data) {
+        if (deviceId !== this.deviceId) return;
+        // Audio control placeholder - implement when RadioAudio is ported
+    }
+
+    /**
+     * Handles SetVolumeLevel event from the broker.
+     */
+    _onSetVolumeLevelEvent(deviceId, name, data) {
+        if (deviceId !== this.deviceId) return;
+        if (typeof data === 'number') {
+            this.setVolumeLevel(data);
+        }
+    }
+
+    /**
+     * Handles SetSquelchLevel event from the broker.
+     */
+    _onSetSquelchLevelEvent(deviceId, name, data) {
+        if (deviceId !== this.deviceId) return;
+        if (typeof data === 'number' && this.settings) {
+            this.writeSettings(this.settings.channel_a, this.settings.channel_b,
+                this.settings.double_channel, this.settings.scan, data);
+        }
+    }
+
+    // ── Clear Channel Timer ────────────────────────────────────────────────
+
+    /**
+     * Set the random delay range for clear-channel timing.
+     * @param {number} ms
+     */
+    setNextChannelTimeRandom(ms) { this._nextChannelTimeRandomMS = ms; }
+
+    /**
+     * Set the next minimum free-channel time.
+     * @param {Date|null} time - Date to wait until, or null to clear.
+     */
+    setNextFreeChannelTime(time) {
+        this._nextMinFreeChannelTime = time;
+        if (this._clearChannelTimer) {
+            clearTimeout(this._clearChannelTimer);
+            this._clearChannelTimer = null;
+        }
+
+        if (!this._nextMinFreeChannelTime) return;
+
+        if (this.IsTncFree()) {
+            const delay = this._calculateClearChannelDelay();
+            if (delay > 0) {
+                this._clearChannelTimer = setTimeout(() => {
+                    this._clearChannelTimer = null;
+                    this.broker.dispatch(this.deviceId, 'ChannelClear', null, false);
+                }, delay);
+            }
+        }
+    }
+
+    /**
+     * Calculate the random delay for clear channel detection.
+     * @returns {number} Delay in ms.
+     */
+    _calculateClearChannelDelay() {
+        const randomDelay = 800 + Math.floor(Math.random() * this._nextChannelTimeRandomMS);
+        if (!this._nextMinFreeChannelTime || this._nextMinFreeChannelTime <= new Date()) {
+            return randomDelay;
+        }
+        return (this._nextMinFreeChannelTime.getTime() - Date.now()) + randomDelay;
+    }
+
+    // ── Lock Management ───────────────────────────────────────────────────
+
+    /**
+     * Returns the current lock usage string, or null if unlocked.
+     */
+    get lockUsage() {
+        return (this.lockState && this.lockState.isLocked) ? this.lockState.usage : null;
+    }
+
+    // ── Cleanup ────────────────────────────────────────────────────────────
+
+    /**
+     * Disposes the radio, cleaning up all broker subscriptions.
+     */
+    dispose() {
+        this.disconnect();
+        if (this.broker) {
+            this.broker.dispose();
         }
     }
 }

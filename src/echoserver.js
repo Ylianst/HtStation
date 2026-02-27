@@ -5,6 +5,9 @@ const logger = global.logger ? global.logger.getLogger('Echo') : console;
 
 const AX25Session = require('./AX25Session');
 const AX25Packet = require('./AX25Packet');
+const BSSPacket = require('./BSSPacket');
+const DataBroker = require('./utils/DataBroker');
+const DataBrokerClient = require('./utils/DataBrokerClient');
 
 class EchoServer {
     constructor(config, radio, sessionRegistry) {
@@ -16,6 +19,104 @@ class EchoServer {
         
         // === AX25 Session Management for Echo Mode ===
         this.activeSessions = new Map(); // Map of session keys to session objects
+
+        // Data Broker client for receiving UniqueDataFrame events
+        this._broker = new DataBrokerClient();
+        this._broker.subscribe(DataBroker.AllDevices, 'UniqueDataFrame', this._onUniqueDataFrame.bind(this));
+    }
+
+    /**
+     * Handle UniqueDataFrame events from the Data Broker.
+     * This replaces the direct call from htstation.js
+     */
+    _onUniqueDataFrame(deviceId, name, frame) {
+        if (!frame || !frame.data) return;
+
+        // Check if this is a BSS packet (starts with 0x01)
+        if (BSSPacket.isBSSPacket(frame.data)) {
+            this.processBSSPacket(frame);
+            return;
+        }
+
+        // Attempt to decode AX.25 packet
+        const packet = AX25Packet.decodeAX25Packet(frame);
+        if (!packet) return;
+
+        // Skip APRS channel packets - those are handled by AprsHandler
+        if (packet.channel_name === 'APRS') return;
+
+        // Check if first address matches our station (Echo server)
+        if (packet.addresses && packet.addresses.length >= 1) {
+            const firstAddr = packet.addresses[0];
+            if (firstAddr.address === this.RADIO_CALLSIGN && firstAddr.SSID == this.RADIO_STATIONID) {
+                logger.log(`[Echo Server] Routing packet to Echo Server (${this.RADIO_CALLSIGN}-${this.RADIO_STATIONID})`);
+                this.processPacket(packet);
+            }
+        }
+    }
+
+    /**
+     * Process a BSS packet.
+     * If the destination matches our station and there's a message, echo it back.
+     */
+    processBSSPacket(frame) {
+        const bssPacket = BSSPacket.decode(frame.data);
+        if (!bssPacket) {
+            logger.log('[Echo Server] Failed to decode BSS packet');
+            return;
+        }
+
+        logger.log(`[Echo Server] Received BSS packet: ${bssPacket.toString()}`);
+
+        // Build our station identifier for comparison
+        const ourStation = this.RADIO_STATIONID > 0 
+            ? `${this.RADIO_CALLSIGN}-${this.RADIO_STATIONID}` 
+            : this.RADIO_CALLSIGN;
+
+        // Check if destination matches our station
+        const destination = bssPacket.destination || '';
+        if (destination.toUpperCase() !== ourStation.toUpperCase()) {
+            logger.log(`[Echo Server] BSS packet not for us (dest: ${destination}, our: ${ourStation})`);
+            return;
+        }
+
+        // Check if there's a message to echo
+        if (!bssPacket.message || bssPacket.message.length === 0) {
+            logger.log('[Echo Server] BSS packet has no message to echo');
+            return;
+        }
+
+        // Create reply packet: swap source and destination
+        const replyPacket = new BSSPacket(
+            ourStation,           // Our station as source (callsign field)
+            bssPacket.callsign,   // Original sender as destination
+            bssPacket.message     // Echo the same message
+        );
+
+        // Encode and send the reply
+        const replyData = replyPacket.encode();
+        
+        if (typeof this.radio.sendTncFrame !== 'function') {
+            logger.warn('[Echo Server] radio.sendTncFrame not implemented.');
+            return;
+        }
+
+        this.radio.sendTncFrame({
+            channel_id: frame.channel_id,
+            data: replyData
+        });
+        
+        logger.log(`[Echo Server] Echoed BSS message back to ${bssPacket.callsign}: ${bssPacket.message}`);
+    }
+
+    /**
+     * Dispose the handler, cleaning up broker subscriptions.
+     */
+    dispose() {
+        if (this._broker) {
+            this._broker.dispose();
+            this._broker = null;
+        }
     }
     
     // Helper function to create session key from addresses

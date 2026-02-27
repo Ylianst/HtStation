@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Radio Status - HtStation</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e0e0e0;
+        }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 20px;
+        }
+        h1 { font-size: 20px; font-weight: 600; color: #fff; display: flex; align-items: center; gap: 10px; }
+        .header-controls { display: flex; align-items: center; gap: 12px; }
+        .home-link { color: #3498db; text-decoration: none; font-size: 14px; }
+        .home-link:hover { text-decoration: underline; }
+        .connection-status {
+            display: flex; align-items: center; gap: 8px; padding: 6px 14px;
+            border-radius: 20px; font-weight: 500; font-size: 12px;
+        }
+        .connection-status.connected { background: rgba(46,204,113,0.2); color: #2ecc71; border: 1px solid rgba(46,204,113,0.3); }
+        .connection-status.disconnected { background: rgba(231,76,60,0.2); color: #e74c3c; border: 1px solid rgba(231,76,60,0.3); }
+        .connection-status.connecting { background: rgba(241,196,15,0.2); color: #f1c40f; border: 1px solid rgba(241,196,15,0.3); }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .connected .status-dot { background: #2ecc71; box-shadow: 0 0 10px #2ecc71; }
+        .disconnected .status-dot { background: #e74c3c; }
+        .connecting .status-dot { background: #f1c40f; animation: pulse 1s infinite; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+        .radio-status {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;
+        }
+        .status-card {
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px; padding: 15px; text-align: center;
+        }
+        .status-card.active { border-color: #2ecc71; background: rgba(46,204,113,0.1); }
+        .status-card.warning { border-color: #f1c40f; background: rgba(241,196,15,0.1); }
+        .status-card .icon { font-size: 28px; margin-bottom: 8px; }
+        .status-card .label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+        .status-card .value { font-size: 18px; font-weight: 600; color: #fff; margin-top: 4px; }
+        .status-card .subvalue { font-size: 12px; color: #888; margin-top: 2px; }
+
+        .section-title { font-size: 16px; font-weight: 600; margin-bottom: 12px; color: #fff; }
+
+        .channels-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px;
+        }
+        .channel-card {
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px; padding: 12px; cursor: pointer; transition: all 0.2s;
+            text-align: center;
+        }
+        .channel-card:hover { background: rgba(255,255,255,0.08); transform: translateY(-2px); }
+        .channel-card.selected { border-color: #3498db; background: rgba(52,152,219,0.2); }
+        .channel-card.expanded { grid-column: 1 / -1; text-align: left; }
+        .channel-card .ch-num { font-size: 11px; color: #888; margin-bottom: 4px; }
+        .channel-card .ch-name { font-size: 14px; font-weight: 600; color: #fff; }
+        .channel-card .ch-freq { font-size: 12px; color: #3498db; margin-top: 4px; }
+        .channel-card .ch-details { margin-top: 12px; display: none; }
+        .channel-card.expanded .ch-details { display: block; }
+        .ch-details-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+        .ch-detail { background: rgba(0,0,0,0.2); padding: 8px 12px; border-radius: 6px; }
+        .ch-detail .label { font-size: 10px; color: #888; text-transform: uppercase; }
+        .ch-detail .value { font-size: 13px; color: #fff; margin-top: 2px; }
+
+        .no-data { text-align: center; padding: 40px; color: #666; }
+        .no-data .icon { font-size: 48px; margin-bottom: 15px; opacity: 0.5; }
+
+        .volume-bar { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+        .volume-bar .bar { flex: 1; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; }
+        .volume-bar .fill { height: 100%; background: #3498db; transition: width 0.3s; }
+        .volume-bar .level { font-size: 12px; color: #888; min-width: 30px; text-align: right; }
+
+        .radio-info { margin-bottom: 20px; }
+        .radio-info-grid { display: flex; gap: 20px; flex-wrap: wrap; }
+        .radio-info-item { background: rgba(255,255,255,0.03); padding: 8px 15px; border-radius: 6px; }
+        .radio-info-item .label { font-size: 10px; color: #666; text-transform: uppercase; }
+        .radio-info-item .value { font-size: 13px; color: #aaa; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><span class="icon">📻</span> Radio Status</h1>
+            <div class="header-controls">
+                <a href="index.html" class="home-link">🏠 Home</a>
+                <div id="connectionStatus" class="connection-status disconnected">
+                    <span class="status-dot"></span>
+                    <span id="statusText">Disconnected</span>
+                </div>
+            </div>
+        </header>
+
+        <div id="radioInfo" class="radio-info" style="display: none;">
+            <div class="radio-info-grid">
+                <div class="radio-info-item"><span class="label">Model</span><div id="radioModel" class="value">-</div></div>
+                <div class="radio-info-item"><span class="label">Firmware</span><div id="radioFirmware" class="value">-</div></div>
+                <div class="radio-info-item"><span class="label">Hardware</span><div id="radioHardware" class="value">-</div></div>
+                <div class="radio-info-item"><span class="label">Regions</span><div id="radioRegions" class="value">-</div></div>
+            </div>
+        </div>
+
+        <div class="radio-status">
+            <div id="statusConn" class="status-card">
+                <div class="icon">🔌</div>
+                <div class="label">Connection</div>
+                <div id="connValue" class="value">Disconnected</div>
+            </div>
+            <div id="statusChannel" class="status-card">
+                <div class="icon">📡</div>
+                <div class="label">Current Channel</div>
+                <div id="channelValue" class="value">-</div>
+                <div id="channelName" class="subvalue"></div>
+            </div>
+            <div id="statusVolume" class="status-card">
+                <div class="icon">🔊</div>
+                <div class="label">Volume</div>
+                <div id="volumeValue" class="value">-</div>
+                <div class="volume-bar">
+                    <div class="bar"><div id="volumeFill" class="fill" style="width: 0%"></div></div>
+                    <span id="volumeLevel" class="level">0</span>
+                </div>
+            </div>
+            <div id="statusBattery" class="status-card">
+                <div class="icon">🔋</div>
+                <div class="label">Battery</div>
+                <div id="batteryValue" class="value">-</div>
+            </div>
+            <div id="statusTxRx" class="status-card">
+                <div class="icon">📶</div>
+                <div class="label">TX/RX Status</div>
+                <div id="txrxValue" class="value">Idle</div>
+            </div>
+            <div id="statusScan" class="status-card">
+                <div class="icon">🔎</div>
+                <div class="label">Scan / Dual Watch</div>
+                <div id="scanValue" class="value">-</div>
+            </div>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 12px;">
+            <h2 class="section-title" style="margin-bottom: 0;">📋 Programmed Channels</h2>
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #888; cursor: pointer;">
+                <input type="checkbox" id="showAllChannels" onchange="updateChannels(channels)" style="cursor: pointer;">
+                Show all channels
+            </label>
+        </div>
+        <div id="channelsContainer">
+            <div id="loadingChannels" class="no-data">
+                <div class="icon">📻</div>
+                <p id="loadingText">No radio connected</p>
+                <p style="margin-top: 10px; font-size: 12px; color: #555;">Make sure a Bluetooth radio is paired and HtStation is connected to it.</p>
+            </div>
+            <div id="channelsGrid" class="channels-grid" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let channels = [];
+        let radioInfo = null;
+        let htStatus = null;
+        let settings = null;
+        let expandedChannel = null;
+
+        const connectionStatus = document.getElementById('connectionStatus');
+        const statusText = document.getElementById('statusText');
+
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/messagebus`);
+
+            ws.onopen = () => {
+                updateWsStatus('connected');
+                // Subscribe to radio events (device 2 - radio deviceId in htstation.js)
+                const events = ['State', 'Info', 'Channels', 'AllChannelsLoaded', 'HtStatus', 'Settings', 'Volume', 'BatteryAsPercentage'];
+                events.forEach(evt => {
+                    ws.send(JSON.stringify({ action: 'subscribe', deviceId: 2, name: evt }));
+                });
+                
+                // Also request current values (in case radio is already connected)
+                setTimeout(() => {
+                    events.forEach(evt => {
+                        ws.send(JSON.stringify({ action: 'getValue', deviceId: 2, name: evt }));
+                    });
+                }, 100);
+            };
+            ws.onclose = () => { updateWsStatus('disconnected'); setTimeout(connect, 3000); };
+            ws.onerror = () => {};
+            ws.onmessage = (e) => {
+                try { 
+                    const data = JSON.parse(e.data);
+                    console.log('[Radio] Received:', data.type, data.name || '', data);
+                    handleMessage(data); 
+                } catch (err) {
+                    console.error('[Radio] Parse error:', err);
+                }
+            };
+        }
+
+        function updateWsStatus(status) {
+            connectionStatus.className = 'connection-status ' + status;
+            statusText.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+        }
+
+        function handleMessage(data) {
+            // Handle both real-time messages and getValue responses
+            if (data.type === 'message') {
+                processData(data.name, data.data);
+            } else if (data.type === 'getValueResult' && data.exists && data.value !== undefined) {
+                processData(data.name, data.value);
+            }
+        }
+        
+        function processData(name, value) {
+            switch (name) {
+                case 'State': updateRadioState(value); break;
+                case 'Info': updateRadioInfo(value); break;
+                case 'Channels': updateChannels(value); break;
+                case 'HtStatus': updateHtStatus(value); break;
+                case 'Settings': updateSettings(value); break;
+                case 'Volume': updateVolume(value); break;
+                case 'BatteryAsPercentage': updateBattery(value); break;
+            }
+        }
+
+        function updateRadioState(state) {
+            const states = { 1: 'Disconnected', 2: 'Connecting', 3: 'Connected', 5: 'Unable to Connect', 6: 'BT Unavailable', 7: 'Radio Not Found', 8: 'Access Denied' };
+            const stateText = states[state] || 'Unknown';
+            document.getElementById('connValue').textContent = stateText;
+            const card = document.getElementById('statusConn');
+            card.classList.remove('active', 'warning');
+            if (state === 3) card.classList.add('active');
+            else if (state === 2) card.classList.add('warning');
+        }
+
+        function updateRadioInfo(info) {
+            radioInfo = info;
+            const infoDiv = document.getElementById('radioInfo');
+            if (info) {
+                infoDiv.style.display = 'block';
+                // Build model string from vendor_id and product_id
+                const modelStr = info.vendor_id !== undefined && info.product_id !== undefined 
+                    ? `Vendor ${info.vendor_id} / Product ${info.product_id}` 
+                    : '-';
+                document.getElementById('radioModel').textContent = modelStr;
+                // Firmware is soft_ver (not software_ver)
+                document.getElementById('radioFirmware').textContent = info.soft_ver !== undefined ? `v${info.soft_ver}` : '-';
+                // Hardware is hw_ver (not hardware_ver)
+                document.getElementById('radioHardware').textContent = info.hw_ver !== undefined ? `v${info.hw_ver}` : '-';
+                document.getElementById('radioRegions').textContent = info.region_count || '-';
+            } else {
+                infoDiv.style.display = 'none';
+            }
+        }
+
+        function updateChannels(chData) {
+            channels = chData || [];
+            const grid = document.getElementById('channelsGrid');
+            const loading = document.getElementById('loadingChannels');
+            
+            if (!channels || channels.length === 0) {
+                grid.style.display = 'none';
+                loading.style.display = 'block';
+                return;
+            }
+            
+            loading.style.display = 'none';
+            grid.style.display = 'grid';
+            
+            const showAll = document.getElementById('showAllChannels').checked;
+            
+            grid.innerHTML = channels.map((ch, i) => {
+                if (!ch) return '';
+                // Filter out channels without names unless "Show all" is checked
+                if (!showAll && (!ch.name_str || ch.name_str.trim() === '')) return '';
+                const isSelected = htStatus && htStatus.curr_ch_id === i;
+                const isExpanded = expandedChannel === i;
+                const rxFreq = ch.rx_freq ? (ch.rx_freq / 1000000).toFixed(4) : '-';
+                const txFreq = ch.tx_freq ? (ch.tx_freq / 1000000).toFixed(4) : '-';
+                
+                let detailsHtml = '';
+                if (isExpanded) {
+                    detailsHtml = `<div class="ch-details">
+                        <div class="ch-details-grid">
+                            <div class="ch-detail"><div class="label">RX Frequency</div><div class="value">${rxFreq} MHz</div></div>
+                            <div class="ch-detail"><div class="label">TX Frequency</div><div class="value">${txFreq} MHz</div></div>
+                            <div class="ch-detail"><div class="label">TX Power</div><div class="value">${ch.tx_power === 0 ? 'Low' : 'High'}</div></div>
+                            <div class="ch-detail"><div class="label">Bandwidth</div><div class="value">${ch.bandwidth === 0 ? 'Narrow (12.5kHz)' : 'Wide (25kHz)'}</div></div>
+                            <div class="ch-detail"><div class="label">CTCSS/DCS</div><div class="value">${ch.ctcss_dcs || 'None'}</div></div>
+                            <div class="ch-detail"><div class="label">Modulation</div><div class="value">${ch.modulation === 0 ? 'FM' : ch.modulation === 1 ? 'AM' : 'Digital'}</div></div>
+                        </div>
+                    </div>`;
+                }
+                
+                return `<div class="channel-card ${isSelected ? 'selected' : ''} ${isExpanded ? 'expanded' : ''}" onclick="toggleChannel(${i})">
+                    <div class="ch-num">CH ${i + 1}</div>
+                    <div class="ch-name">${ch.name_str || `Channel ${i + 1}`}</div>
+                    <div class="ch-freq">${rxFreq} MHz</div>
+                    ${detailsHtml}
+                </div>`;
+            }).join('');
+        }
+
+        function toggleChannel(idx) {
+            expandedChannel = expandedChannel === idx ? null : idx;
+            updateChannels(channels);
+        }
+
+        function updateHtStatus(status) {
+            htStatus = status;
+            if (!status) {
+                document.getElementById('channelValue').textContent = '-';
+                document.getElementById('channelName').textContent = '';
+                document.getElementById('txrxValue').textContent = 'Idle';
+                document.getElementById('scanValue').textContent = '-';
+                return;
+            }
+            
+            const chId = status.curr_ch_id;
+            document.getElementById('channelValue').textContent = `CH ${chId + 1}`;
+            const chName = channels && channels[chId] ? (channels[chId].name_str || '') : '';
+            document.getElementById('channelName').textContent = chName;
+
+            // TX/RX status
+            let txrx = 'Idle';
+            const txrxCard = document.getElementById('statusTxRx');
+            txrxCard.classList.remove('active', 'warning');
+            if (status.is_in_tx) { txrx = '🔴 Transmitting'; txrxCard.classList.add('warning'); }
+            else if (status.is_in_rx) { txrx = '🟢 Receiving'; txrxCard.classList.add('active'); }
+            document.getElementById('txrxValue').textContent = txrx;
+
+            // Scan / Dual Watch
+            let scanText = [];
+            if (status.is_scan) scanText.push('Scan ON');
+            if (status.double_channel > 0) scanText.push(`Dual Watch (${status.double_channel})`);
+            document.getElementById('scanValue').textContent = scanText.length > 0 ? scanText.join(' / ') : 'Off';
+
+            // Update selected channel highlight
+            updateChannels(channels);
+        }
+
+        function updateSettings(settingsData) {
+            settings = settingsData;
+        }
+
+        function updateVolume(vol) {
+            const pct = Math.round((vol / 15) * 100);
+            document.getElementById('volumeValue').textContent = `${pct}%`;
+            document.getElementById('volumeFill').style.width = `${pct}%`;
+            document.getElementById('volumeLevel').textContent = vol;
+        }
+
+        function updateBattery(pct) {
+            document.getElementById('batteryValue').textContent = pct ? `${pct}%` : '-';
+            const card = document.getElementById('statusBattery');
+            card.classList.remove('active', 'warning');
+            if (pct > 50) card.classList.add('active');
+            else if (pct > 20) card.classList.add('warning');
+        }
+
+        connect();
+    </script>
+</body>
+</html>

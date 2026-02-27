@@ -37,6 +37,10 @@ class GaiaClient {
         this.accumulator = Buffer.alloc(0);
         this.commandInterval = null;
         
+        // Statistics for frame synchronization
+        this.syncErrors = 0;
+        this.framesReceived = 0;
+        
         // Callback properties for handling events
         this.onFrameReceived = () => {};
         this.onConnectionStatusChanged = () => {};
@@ -187,22 +191,58 @@ class GaiaClient {
             return { size: 0, cmd: null };
         }
 
+        // Check for valid GAIA frame signature
         if (data.readUInt8(index) !== GAIA_SYNC || data.readUInt8(index + 1) !== GAIA_VERSION) {
-            console.error(`Invalid GAIA frame signature. Discarding first byte: ${data.readUInt8(index).toString(16)}`);
+            // Search for next potential frame start
+            let nextSyncPos = -1;
+            for (let i = index + 1; i < len; i++) {
+                if (data.readUInt8(i) === GAIA_SYNC) {
+                    nextSyncPos = i;
+                    break;
+                }
+            }
+            
+            if (nextSyncPos === -1) {
+                // No sync byte found, discard everything except last byte (might be partial sync)
+                const bytesDiscarded = len - index - 1;
+                if (bytesDiscarded > 0) {
+                    this.syncErrors++;
+                    if (bytesDiscarded >= 10) {
+                        logger.warn(`[Radio] GAIA sync lost. Discarded ${bytesDiscarded} bytes searching for frame start.`);
+                    }
+                }
+                return { size: -(len - index - 1), cmd: null };
+            } else {
+                // Found next sync byte, discard bytes up to it
+                const bytesDiscarded = nextSyncPos - index;
+                this.syncErrors++;
+                if (bytesDiscarded >= 10) {
+                    logger.warn(`[Radio] GAIA sync error. Discarded ${bytesDiscarded} bytes to resynchronize.`);
+                }
+                return { size: -bytesDiscarded, cmd: null };
+            }
+        }
+
+        // Validate payload length is reasonable (prevent buffer overflow)
+        const payloadLength = data.readUInt8(index + 3);
+        if (payloadLength > 255) {
+            logger.error(`[Radio] Invalid GAIA payload length: ${payloadLength}. Skipping frame.`);
             return { size: -1, cmd: null };
         }
 
-        const payloadLength = data.readUInt8(index + 3);
         const hasChecksum = (data.readUInt8(index + 2) & GAIA_CHECKSUM_PRESENT);
         const totalLength = payloadLength + GAIA_HEADER_LENGTH + hasChecksum;
 
+        // Check if we have the complete frame
         if (totalLength > len) {
             return { size: 0, cmd: null };
         }
 
+        // Extract the command payload
         const cmd = Buffer.alloc(4 + payloadLength);
         data.copy(cmd, 0, index + 4, index + 4 + cmd.length);
 
+        this.framesReceived++;
         return { size: totalLength, cmd };
     }
 }

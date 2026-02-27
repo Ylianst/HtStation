@@ -114,6 +114,36 @@ node htstation.js --run
 
 You should see Bluetooth connection messages in the console.
 
+## Automatic Reconnection
+
+HtStation includes automatic Bluetooth reconnection to handle situations where the radio is turned off and back on.
+
+### How It Works
+
+- **Enabled by default**: After the initial successful connection, HtStation automatically enables reconnection
+- **15-second interval**: If the connection drops unexpectedly, HtStation will attempt to reconnect every 15 seconds
+- **Smart detection**: Manual disconnects (when you stop the application) won't trigger reconnection attempts
+- **Status logging**: You'll see clear messages in the console when reconnection attempts occur
+
+### Disabling Auto-Reconnection
+
+If you prefer to manually reconnect, add this line to your `config.ini`:
+
+```ini
+BLUETOOTH_AUTO_RECONNECT=false
+```
+
+### What You'll See
+
+When the radio connection drops:
+```
+[App] Disconnected from radio.
+[Radio] Scheduling reconnection attempt in 15 seconds...
+[Radio] Attempting automatic reconnection...
+[Radio] Successfully connected to the radio.
+[App] Radio connected successfully
+```
+
 ## Troubleshooting
 
 ### Device not appearing in scan:

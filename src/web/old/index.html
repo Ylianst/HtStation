@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Handi-Talky Station</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Title Bar -->
+    <header class="title-bar">
+        <h1>Handi-Talky Station</h1>
+        <div class="title-status">
+            <div class="status-item">
+                <span class="label">Radio:</span>
+                <span id="radio-status" class="status">Unknown</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Connecting Overlay -->
+    <div id="connecting-overlay" class="connecting-overlay">
+        <div class="connecting-content">
+            <h2>Connecting...</h2>
+            <p>Establishing connection to radio server...</p>
+            <div class="connecting-spinner"></div>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <!-- Left Sidebar Navigation -->
+        <aside class="sidebar">
+            <nav class="nav-menu">
+                <ul>
+                    <li><a href="#" class="nav-item active" data-view="overview">Overview</a></li>
+
+                    <!-- BBS Section -->
+                    <li class="nav-section-header">BBS</li>
+                    <li><a href="#" class="nav-item" data-view="current-connections">Real-time</a></li>
+                    <li><a href="#" class="nav-item" data-view="last-connections">Connections</a></li>
+                    <li><a href="#" class="nav-item" data-view="bulletins">Bulletins</a></li>
+
+                    <!-- Other Services -->
+                    <li class="nav-separator"></li>
+                    <li class="nav-section-header">APRS</li>
+                    <li><a href="#" class="nav-item nav-subsection" data-view="aprs-messages">Messages</a></li>
+                    <li><a href="#" class="nav-item nav-subsection" data-view="aprs-map">Map</a></li>
+                    
+                    <li class="nav-separator"></li>
+                    <li><a href="#" class="nav-item" data-view="winlink-mail">WinLink Mail</a></li>
+                </ul>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <div class="status-info">
+                    <div class="status-item">
+                        <span class="label">Station:</span>
+                        <span id="station-callsign" class="value">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Uptime:</span>
+                        <span id="app-uptime" class="value">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Active:</span>
+                        <span id="active-connections" class="value">0</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Updated:</span>
+                        <span id="last-update" class="value">--</span>
+                    </div>
+                </div>
+                
+                <div class="controls">
+                    <button id="refresh-btn" onclick="refreshData()">Refresh</button>
+                    <button id="auto-refresh-btn" onclick="toggleAutoRefresh()">Auto: ON</button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="content-area">
+            <!-- Overview View -->
+            <div id="view-overview" class="content-view active">
+                <h2>System Overview</h2>
+                <div class="stats-grid">
+                    <!-- System Stats -->
+                    <div class="stats-section">
+                        <h3>System Status</h3>
+                        <div class="stats-grid">
+                            <div class="stat-item">
+                                <span class="stat-label">Radio Connection:</span>
+                                <span id="overview-radio-status" class="stat-value status">Unknown</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Application Uptime:</span>
+                                <span id="overview-uptime" class="stat-value">--</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Active Sessions:</span>
+                                <span id="overview-active" class="stat-value">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">BBS Station:</span>
+                                <span id="overview-bbs-station" class="stat-value">--</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">WinLink Station:</span>
+                                <span id="overview-winlink-station" class="stat-value">--</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Last Update:</span>
+                                <span id="overview-last-update" class="stat-value">--</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- BBS Stats -->
+                    <div class="stats-section">
+                        <h3>BBS Status</h3>
+                        <div class="stats-grid">
+                            <div class="stat-item">
+                                <span class="stat-label">BBS Connected:</span>
+                                <span id="bbs-connected-status" class="stat-value status">Unknown</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Active BBS Sessions:</span>
+                                <span id="bbs-active-sessions" class="stat-value">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Total BBS Connections:</span>
+                                <span id="bbs-total-connections" class="stat-value">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Active Bulletins:</span>
+                                <span id="bbs-active-bulletins" class="stat-value">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Last BBS Activity:</span>
+                                <span id="bbs-last-activity" class="stat-value">--</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- APRS Stats -->
+                    <div class="stats-section">
+                        <h3>APRS Status</h3>
+                        <div class="stats-grid">
+                            <div class="stat-item">
+                                <span class="stat-label">APRS Messages:</span>
+                                <span id="aprs-total-messages" class="stat-value">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">APRS Stations:</span>
+                                <span id="aprs-stations-count" class="stat-value">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Last APRS Message:</span>
+                                <span id="aprs-last-message" class="stat-value">--</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">APRS Status:</span>
+                                <span id="aprs-status" class="stat-value status">Inactive</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- WinLink Stats -->
+                    <div class="stats-section">
+                        <h3>WinLink Mail Status</h3>
+                        <div class="stats-grid">
+                            <div class="stat-item">
+                                <span class="stat-label">📥 Inbox:</span>
+                                <span id="winlink-inbox-count" class="stat-value">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">📤 Outbox:</span>
+                                <span id="winlink-outbox-count" class="stat-value">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">📝 Draft:</span>
+                                <span id="winlink-draft-count" class="stat-value">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">✉️ Sent:</span>
+                                <span id="winlink-sent-count" class="stat-value">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">📦 Archive:</span>
+                                <span id="winlink-archive-count" class="stat-value">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">🗑️ Trash:</span>
+                                <span id="winlink-trash-count" class="stat-value">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Total Messages:</span>
+                                <span id="winlink-total-messages" class="stat-value">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Last Activity:</span>
+                                <span id="winlink-last-activity" class="stat-value">--</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Current Connections View -->
+            <div id="view-current-connections" class="content-view">
+                <h2>BBS Real-time</h2>
+                <div id="session-terminals" class="session-terminals">
+                    <!-- Terminal interfaces will be dynamically created here -->
+                </div>
+                <div id="current-connections" class="data-section">
+                    <div class="no-data">No active connections</div>
+                </div>
+            </div>
+
+            <!-- Last Connections View -->
+            <div id="view-last-connections" class="content-view">
+                <h2>BBS Connections</h2>
+                <div id="bbs-connections" class="data-section">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+
+            <!-- APRS Messages View -->
+            <div id="view-aprs-messages" class="content-view">
+                <h2>APRS Messages</h2>
+                
+                <!-- Message Filter Tabs -->
+                <div class="message-tabs">
+                    <button class="tab-btn active" data-filter="all" onclick="filterAprsMessages('all')">
+                        All (<span id="aprs-count-all">0</span>)
+                    </button>
+                    <button class="tab-btn" data-filter="received" onclick="filterAprsMessages('received')">
+                        Received (<span id="aprs-count-received">0</span>)
+                    </button>
+                    <button class="tab-btn" data-filter="sent" onclick="filterAprsMessages('sent')">
+                        Sent (<span id="aprs-count-sent">0</span>)
+                    </button>
+                </div>
+                
+                <!-- Search and Filter -->
+                <div class="message-controls">
+                    <input type="text" id="aprs-search" placeholder="Search by callsign or message..." 
+                           oninput="searchAprsMessages()" class="search-input" />
+                    <select id="aprs-type-filter" onchange="filterAprsMessagesByType()" class="type-filter">
+                        <option value="all">All Types</option>
+                        <option value="Message">Messages</option>
+                        <option value="Position">Position</option>
+                        <option value="Weather">Weather</option>
+                        <option value="Status">Status</option>
+                    </select>
+                </div>
+                
+                <div id="aprs-messages" class="data-section">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+            
+            <!-- APRS Map View -->
+            <div id="view-aprs-map" class="content-view">
+                <div class="section-header">
+                    <h2>APRS Map</h2>
+                    <div class="map-controls">
+                        <button onclick="centerMapOnStations()" class="map-control-btn">
+                            🎯 Center on Stations
+                        </button>
+                        <button onclick="toggleMyLocation()" class="map-control-btn" id="my-location-btn">
+                            📍 Show My Location
+                        </button>
+                        <label class="map-control-label">
+                            <input type="checkbox" id="show-paths-check" onchange="togglePaths()" checked />
+                            Show Paths
+                        </label>
+                    </div>
+                </div>
+                
+                <!-- Map Container -->
+                <div id="aprs-map-container" class="map-container">
+                    <div class="map-loading">Loading map...</div>
+                </div>
+            </div>
+
+            <!-- Active Bulletins View -->
+            <div id="view-bulletins" class="content-view">
+                <div class="section-header">
+                    <h2>BBS Bulletins</h2>
+                    <button id="toggle-create-btn" class="add-bulletin-btn" onclick="toggleBulletinForm()" title="Post New Bulletin">
+                        New Bulletin
+                    </button>
+                </div>
+                
+                <!-- Bulletin Creation Form (hidden by default) -->
+                <div id="bulletin-create-form" class="bulletin-create-form" style="display: none;">
+                    <h3>Post New Bulletin</h3>
+                    <div class="form-group">
+                        <label for="bulletin-message">Message (300 characters max):</label>
+                        <textarea 
+                            id="bulletin-message" 
+                            class="bulletin-textarea" 
+                            placeholder="Enter your bulletin message here..."
+                            maxlength="300"
+                            rows="4"
+                        ></textarea>
+                        <div class="char-counter">
+                            <span id="char-count">0</span>/300 characters
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button id="post-bulletin-btn" onclick="postBulletin()">Post Bulletin</button>
+                        <button id="clear-bulletin-btn" onclick="clearBulletinForm()">Clear</button>
+                        <button id="cancel-bulletin-btn" onclick="hideBulletinForm()">Cancel</button>
+                    </div>
+                </div>
+                
+                <div id="bulletins" class="data-section">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+
+            <!-- WinLink Mail View -->
+            <div id="view-winlink-mail" class="content-view">
+                <div class="section-header">
+                    <h2>WinLink Mail</h2>
+                    <button id="toggle-compose-btn" class="add-bulletin-btn" onclick="toggleComposeForm()" title="Compose New Email">
+                        New Mail
+                    </button>
+                </div>
+                
+                <!-- Email Composition Form (hidden by default) -->
+                <div id="compose-form" class="bulletin-create-form" style="display: none;">
+                    <h3>Compose New Email</h3>
+                    <div class="form-group">
+                        <label for="email-to">To (callsign):</label>
+                        <input type="text" id="email-to" class="compose-input" placeholder="Enter recipient callsign..." maxlength="50" />
+                    </div>
+                    <div class="form-group">
+                        <label for="email-subject">Subject:</label>
+                        <input type="text" id="email-subject" class="compose-input" placeholder="Enter email subject..." maxlength="100" />
+                    </div>
+                    <div class="form-group">
+                        <label for="email-body">Message:</label>
+                        <textarea 
+                            id="email-body" 
+                            class="bulletin-textarea" 
+                            placeholder="Enter your message here..."
+                            rows="8"
+                        ></textarea>
+                        <div class="char-counter">
+                            <span id="email-char-count">0</span> characters
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button id="send-email-btn" onclick="sendEmail()">Send Email</button>
+                        <button id="draft-email-btn" onclick="saveDraft()">Save as Draft</button>
+                        <button id="clear-email-btn" onclick="clearComposeForm()">Clear</button>
+                        <button id="cancel-email-btn" onclick="hideComposeForm()">Cancel</button>
+                    </div>
+                </div>
+                
+                <div class="mail-container">
+                    <!-- Mail Folders -->
+                    <div class="mail-sidebar">
+                        <div class="mail-folders">
+                            <button class="folder-btn active" data-folder="inbox" onclick="selectMailFolder('inbox')">
+                                <span class="folder-icon">📥</span>
+                                <span class="folder-name">Inbox</span>
+                                <span class="folder-count" id="inbox-count">0</span>
+                            </button>
+                            <button class="folder-btn" data-folder="outbox" onclick="selectMailFolder('outbox')">
+                                <span class="folder-icon">📤</span>
+                                <span class="folder-name">Outbox</span>
+                                <span class="folder-count" id="outbox-count">0</span>
+                            </button>
+                            <button class="folder-btn" data-folder="draft" onclick="selectMailFolder('draft')">
+                                <span class="folder-icon">📝</span>
+                                <span class="folder-name">Draft</span>
+                                <span class="folder-count" id="draft-count">0</span>
+                            </button>
+                            <button class="folder-btn" data-folder="sent" onclick="selectMailFolder('sent')">
+                                <span class="folder-icon">✉️</span>
+                                <span class="folder-name">Sent</span>
+                                <span class="folder-count" id="sent-count">0</span>
+                            </button>
+                            <button class="folder-btn" data-folder="archive" onclick="selectMailFolder('archive')">
+                                <span class="folder-icon">📦</span>
+                                <span class="folder-name">Archive</span>
+                                <span class="folder-count" id="archive-count">0</span>
+                            </button>
+                            <button class="folder-btn" data-folder="trash" onclick="selectMailFolder('trash')">
+                                <span class="folder-icon">🗑️</span>
+                                <span class="folder-name">Trash</span>
+                                <span class="folder-count" id="trash-count">0</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Mail List -->
+                    <div class="mail-list-container">
+                        <div id="mail-list" class="mail-list">
+                            <div class="loading">Loading mails...</div>
+                        </div>
+                    </div>
+
+                    <!-- Mail Detail -->
+                    <div class="mail-detail-container">
+                        <div id="mail-detail" class="mail-detail">
+                            <div class="no-mail-selected">
+                                <p>Select a mail to view its contents</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

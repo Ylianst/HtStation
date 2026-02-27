@@ -5,6 +5,8 @@ const fs = require('fs');
 const path = require('path');
 const WebSocket = require('ws');
 const os = require('os');
+const DataBroker = require('./utils/DataBroker');
+const DataBrokerClient = require('./utils/DataBrokerClient');
 
 // Get logger instance
 const logger = global.logger ? global.logger.getLogger('WebServer') : console;
@@ -49,8 +51,27 @@ class WebServer {
                     this.handleHttpRequest(req, res);
                 });
                 
-                // Create WebSocket server
-                this.wsServer = new WebSocket.Server({ server: this.httpServer });
+                // Create WebSocket server for dashboard
+                this.wsServer = new WebSocket.Server({ noServer: true });
+                
+                // Create WebSocket server for messagebus
+                this.messageBusWsServer = new WebSocket.Server({ noServer: true });
+                
+                // Handle upgrade requests to route to correct WebSocket server
+                this.httpServer.on('upgrade', (request, socket, head) => {
+                    const pathname = request.url;
+                    
+                    if (pathname === '/messagebus') {
+                        this.messageBusWsServer.handleUpgrade(request, socket, head, (ws) => {
+                            this.messageBusWsServer.emit('connection', ws, request);
+                        });
+                    } else {
+                        // Default to dashboard WebSocket
+                        this.wsServer.handleUpgrade(request, socket, head, (ws) => {
+                            this.wsServer.emit('connection', ws, request);
+                        });
+                    }
+                });
                 
                 // Handle WebSocket server errors
                 this.wsServer.on('error', (error) => {
@@ -58,7 +79,7 @@ class WebServer {
                     reject(error);
                 });
                 
-                // Handle WebSocket connections
+                // Handle WebSocket connections for dashboard
                 this.wsServer.on('connection', (ws, req) => {
                     logger.log(`[WebServer] New WebSocket connection from ${req.socket.remoteAddress}`);
                     this.clients.add(ws);
@@ -86,6 +107,12 @@ class WebServer {
                     });
                 });
                 
+                // Handle WebSocket connections for messagebus
+                this.messageBusWsServer.on('connection', (ws, req) => {
+                    logger.log(`[WebServer] New MessageBus WebSocket connection from ${req.socket.remoteAddress}`);
+                    this.setupMessageBusClient(ws);
+                });
+                
                 // Start the server
                 this.httpServer.listen(port, () => {
                     logger.log(`[WebServer] HTTP server started on port ${port}`);
@@ -106,6 +133,9 @@ class WebServer {
     }
     
     stop() {
+        if (this.messageBusWsServer) {
+            this.messageBusWsServer.close();
+        }
         if (this.wsServer) {
             this.wsServer.close();
         }
@@ -113,6 +143,261 @@ class WebServer {
             this.httpServer.close();
         }
         logger.log('[WebServer] Web server stopped');
+    }
+    
+    /**
+     * Sets up a MessageBus WebSocket client with DataBroker integration.
+     * @param {WebSocket} ws - The WebSocket connection
+     */
+    setupMessageBusClient(ws) {
+        // Create a DataBrokerClient for this WebSocket connection
+        const brokerClient = new DataBrokerClient();
+        
+        // Track subscriptions for this client
+        const subscriptions = new Map(); // Map<subscriptionKey, { deviceId, name }>
+        
+        // Helper to generate subscription key
+        const makeSubKey = (deviceId, name) => `${deviceId}:${name}`;
+        
+        // Send a message to the WebSocket client
+        const sendToClient = (data) => {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify(data));
+            }
+        };
+        
+        // Handle incoming messages from the client
+        ws.on('message', (message) => {
+            try {
+                const data = JSON.parse(message);
+                this.handleMessageBusMessage(ws, data, brokerClient, subscriptions, makeSubKey, sendToClient);
+            } catch (error) {
+                logger.error('[WebServer] Invalid MessageBus message:', error);
+                sendToClient({
+                    type: 'error',
+                    error: 'Invalid JSON message'
+                });
+            }
+        });
+        
+        // Clean up on close
+        ws.on('close', () => {
+            logger.log('[WebServer] MessageBus WebSocket connection closed');
+            brokerClient.dispose();
+            subscriptions.clear();
+        });
+        
+        // Clean up on error
+        ws.on('error', (error) => {
+            logger.error('[WebServer] MessageBus WebSocket error:', error);
+            brokerClient.dispose();
+            subscriptions.clear();
+        });
+        
+        // Send welcome message with available actions
+        sendToClient({
+            type: 'welcome',
+            message: 'Connected to MessageBus',
+            actions: ['subscribe', 'unsubscribe', 'dispatch', 'getValue', 'hasValue'],
+            constants: {
+                AllDevices: DataBroker.AllDevices,
+                AllNames: DataBroker.AllNames
+            }
+        });
+    }
+    
+    /**
+     * Handles messages from MessageBus WebSocket clients.
+     * @param {WebSocket} ws - The WebSocket connection
+     * @param {object} data - The parsed message data
+     * @param {DataBrokerClient} brokerClient - The DataBrokerClient for this connection
+     * @param {Map} subscriptions - Map of active subscriptions
+     * @param {function} makeSubKey - Helper to generate subscription keys
+     * @param {function} sendToClient - Helper to send messages to the client
+     */
+    handleMessageBusMessage(ws, data, brokerClient, subscriptions, makeSubKey, sendToClient) {
+        const { action, requestId } = data;
+        
+        switch (action) {
+            case 'subscribe': {
+                // Subscribe to specific events or all events
+                // data: { action: 'subscribe', deviceId: number, name: string, requestId?: string }
+                // Use deviceId: -1 (AllDevices) and/or name: '*' (AllNames) for subscribe all
+                const deviceId = data.deviceId !== undefined ? data.deviceId : DataBroker.AllDevices;
+                const name = data.name !== undefined ? data.name : DataBroker.AllNames;
+                const subKey = makeSubKey(deviceId, name);
+                
+                if (subscriptions.has(subKey)) {
+                    sendToClient({
+                        type: 'subscribeResult',
+                        success: false,
+                        error: 'Already subscribed',
+                        deviceId,
+                        name,
+                        requestId
+                    });
+                    return;
+                }
+                
+                // Create callback for this subscription
+                const callback = (eventDeviceId, eventName, eventData) => {
+                    sendToClient({
+                        type: 'message',
+                        deviceId: eventDeviceId,
+                        name: eventName,
+                        data: eventData,
+                        timestamp: new Date().toISOString()
+                    });
+                };
+                
+                brokerClient.subscribe(deviceId, name, callback);
+                subscriptions.set(subKey, { deviceId, name, callback });
+                
+                logger.log(`[WebServer] MessageBus client subscribed to deviceId=${deviceId}, name=${name}`);
+                
+                sendToClient({
+                    type: 'subscribeResult',
+                    success: true,
+                    deviceId,
+                    name,
+                    requestId
+                });
+                break;
+            }
+            
+            case 'unsubscribe': {
+                // Unsubscribe from specific events
+                // data: { action: 'unsubscribe', deviceId: number, name: string, requestId?: string }
+                const deviceId = data.deviceId !== undefined ? data.deviceId : DataBroker.AllDevices;
+                const name = data.name !== undefined ? data.name : DataBroker.AllNames;
+                const subKey = makeSubKey(deviceId, name);
+                
+                if (!subscriptions.has(subKey)) {
+                    sendToClient({
+                        type: 'unsubscribeResult',
+                        success: false,
+                        error: 'Not subscribed',
+                        deviceId,
+                        name,
+                        requestId
+                    });
+                    return;
+                }
+                
+                brokerClient.unsubscribe(deviceId, name);
+                subscriptions.delete(subKey);
+                
+                logger.log(`[WebServer] MessageBus client unsubscribed from deviceId=${deviceId}, name=${name}`);
+                
+                sendToClient({
+                    type: 'unsubscribeResult',
+                    success: true,
+                    deviceId,
+                    name,
+                    requestId
+                });
+                break;
+            }
+            
+            case 'dispatch': {
+                // Dispatch a message to the DataBroker
+                // data: { action: 'dispatch', deviceId: number, name: string, data: any, store?: boolean, requestId?: string }
+                const deviceId = data.deviceId;
+                const name = data.name;
+                const eventData = data.data;
+                const store = data.store !== undefined ? data.store : true;
+                
+                if (deviceId === undefined || name === undefined) {
+                    sendToClient({
+                        type: 'dispatchResult',
+                        success: false,
+                        error: 'deviceId and name are required',
+                        requestId
+                    });
+                    return;
+                }
+                
+                brokerClient.dispatch(deviceId, name, eventData, store);
+                
+                logger.log(`[WebServer] MessageBus client dispatched to deviceId=${deviceId}, name=${name}`);
+                
+                sendToClient({
+                    type: 'dispatchResult',
+                    success: true,
+                    deviceId,
+                    name,
+                    requestId
+                });
+                break;
+            }
+            
+            case 'getValue': {
+                // Get a value from the DataBroker
+                // data: { action: 'getValue', deviceId: number, name: string, requestId?: string }
+                const deviceId = data.deviceId;
+                const name = data.name;
+                
+                if (deviceId === undefined || name === undefined) {
+                    sendToClient({
+                        type: 'getValueResult',
+                        success: false,
+                        error: 'deviceId and name are required',
+                        requestId
+                    });
+                    return;
+                }
+                
+                const value = brokerClient.getValue(deviceId, name);
+                const exists = brokerClient.hasValue(deviceId, name);
+                
+                sendToClient({
+                    type: 'getValueResult',
+                    success: true,
+                    deviceId,
+                    name,
+                    value,
+                    exists,
+                    requestId
+                });
+                break;
+            }
+            
+            case 'hasValue': {
+                // Check if a value exists in the DataBroker
+                // data: { action: 'hasValue', deviceId: number, name: string, requestId?: string }
+                const deviceId = data.deviceId;
+                const name = data.name;
+                
+                if (deviceId === undefined || name === undefined) {
+                    sendToClient({
+                        type: 'hasValueResult',
+                        success: false,
+                        error: 'deviceId and name are required',
+                        requestId
+                    });
+                    return;
+                }
+                
+                const exists = brokerClient.hasValue(deviceId, name);
+                
+                sendToClient({
+                    type: 'hasValueResult',
+                    success: true,
+                    deviceId,
+                    name,
+                    exists,
+                    requestId
+                });
+                break;
+            }
+            
+            default:
+                sendToClient({
+                    type: 'error',
+                    error: `Unknown action: ${action}`,
+                    requestId
+                });
+        }
     }
     
     setupEventListeners() {
