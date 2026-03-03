@@ -11,7 +11,7 @@
 
 const path = require('path');
 const fs = require('fs');
-const { execSync } = require('child_process');
+const { execSync, spawn } = require('child_process');
 
 /**
  * Check if required dependencies are installed
@@ -61,6 +61,7 @@ function showDependencyError(missing) {
 // Parse command-line arguments
 const args = process.argv.slice(2);
 const hasRun = args.includes('--run');
+const hasLaunched = args.includes('--launched');
 const hasServer = args.includes('--server');
 const hasInstall = args.includes('--install');
 const hasUninstall = args.includes('--uninstall');
@@ -605,6 +606,62 @@ function runApplication() {
     require(path.join(__dirname, 'src', 'htstation.js'));
 }
 
+/**
+ * Run with child process management
+ * Spawns a child with --launched and restarts it if it exits
+ * Kills child on parent exit or SIGINT
+ */
+function runWithChildProcess() {
+    let child = null;
+    let shouldRestart = true;
+    
+    function spawnChild() {
+        const scriptPath = path.resolve(__dirname, 'htstation.js');
+        child = spawn(process.execPath, [scriptPath, '--launched'], {
+            stdio: 'inherit',
+            cwd: __dirname
+        });
+        
+        child.on('exit', (code, signal) => {
+            child = null;
+            if (shouldRestart) {
+                console.log(`Child process exited (code: ${code}, signal: ${signal}), restarting...`);
+                setTimeout(spawnChild, 1000);
+            }
+        });
+        
+        child.on('error', (err) => {
+            console.error('Child process error:', err.message);
+            child = null;
+            if (shouldRestart) {
+                setTimeout(spawnChild, 1000);
+            }
+        });
+    }
+    
+    function cleanup() {
+        shouldRestart = false;
+        if (child) {
+            child.kill('SIGTERM');
+            child = null;
+        }
+        process.exit(0);
+    }
+    
+    // Handle parent exit signals
+    process.on('SIGINT', cleanup);
+    process.on('SIGTERM', cleanup);
+    process.on('exit', () => {
+        shouldRestart = false;
+        if (child) {
+            child.kill('SIGTERM');
+        }
+    });
+    
+    // Start the child process
+    spawnChild();
+}
+
 // Main logic
 if (hasHelp) {
     showHelp();
@@ -639,7 +696,8 @@ if (hasHelp) {
 } else if (hasRestart) {
     restartService();
     process.exit(0);
-} else if (hasRun || hasServer) {
+} else if (hasLaunched) {
+    // This is the child process launched by --run, actually start the server
     // Check for MACADDRESS before running
     if (!checkMacAddress()) {
         showBluetoothSetupReminder();
@@ -648,7 +706,27 @@ if (hasHelp) {
         console.log('');
         process.exit(1);
     }
-    // Both --run and --server start the application
+    runApplication();
+} else if (hasRun) {
+    // Check for MACADDRESS before running
+    if (!checkMacAddress()) {
+        showBluetoothSetupReminder();
+        console.log('');
+        console.log('Please configure Bluetooth before running HtStation.');
+        console.log('');
+        process.exit(1);
+    }
+    // Parent process: spawn child with --launched and manage it
+    runWithChildProcess();
+} else if (hasServer) {
+    // Check for MACADDRESS before running
+    if (!checkMacAddress()) {
+        showBluetoothSetupReminder();
+        console.log('');
+        console.log('Please configure Bluetooth before running HtStation.');
+        console.log('');
+        process.exit(1);
+    }
     // --server flag is handled inside src/htstation.js for background mode
     runApplication();
 } else {

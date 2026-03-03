@@ -434,6 +434,12 @@ class WebServer {
     }
     
     handleHttpRequest(req, res) {
+        // Handle API endpoints
+        if (req.url === '/api/config') {
+            this.handleConfigApi(req, res);
+            return;
+        }
+        
         const url = req.url === '/' ? '/index.html' : req.url;
         const filePath = path.join(__dirname, './web', url);
         
@@ -1304,6 +1310,165 @@ class WebServer {
         result += `${secs}s`;
         
         return result.trim();
+    }
+    
+    /**
+     * Handle configuration API requests
+     * GET /api/config - Read current configuration
+     * POST /api/config - Save configuration
+     */
+    handleConfigApi(req, res) {
+        const configPath = path.join(__dirname, '..', 'config.ini');
+        
+        if (req.method === 'GET') {
+            // Read configuration
+            try {
+                const config = this.readConfigFile(configPath);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(config));
+            } catch (error) {
+                logger.error('[WebServer] Error reading config:', error);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Failed to read configuration' }));
+            }
+        } else if (req.method === 'POST') {
+            // Save configuration
+            let body = '';
+            req.on('data', chunk => {
+                body += chunk.toString();
+            });
+            req.on('end', () => {
+                try {
+                    const newConfig = JSON.parse(body);
+                    this.writeConfigFile(configPath, newConfig);
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: true }));
+                    logger.log('[WebServer] Configuration saved successfully');
+                } catch (error) {
+                    logger.error('[WebServer] Error saving config:', error);
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: error.message || 'Failed to save configuration' }));
+                }
+            });
+        } else {
+            res.writeHead(405, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Method not allowed' }));
+        }
+    }
+    
+    /**
+     * Read and parse config.ini file
+     */
+    readConfigFile(configPath) {
+        if (!fs.existsSync(configPath)) {
+            return {};
+        }
+        
+        const lines = fs.readFileSync(configPath, 'utf8').split(/\r?\n/);
+        const config = {};
+        
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) continue;
+            
+            const idx = trimmed.indexOf('=');
+            if (idx === -1) continue;
+            
+            const key = trimmed.slice(0, idx).trim();
+            const value = trimmed.slice(idx + 1).trim();
+            
+            // Handle multiple AUTH entries by storing them in an array
+            if (key === 'AUTH') {
+                if (!config.AUTH) {
+                    config.AUTH = [];
+                }
+                config.AUTH.push(value);
+            } else {
+                config[key] = value;
+            }
+        }
+        
+        return config;
+    }
+    
+    /**
+     * Write config.ini file from config object
+     */
+    writeConfigFile(configPath, config) {
+        // Read existing file to preserve comments and structure
+        let existingContent = '';
+        const existingComments = [];
+        
+        if (fs.existsSync(configPath)) {
+            existingContent = fs.readFileSync(configPath, 'utf8');
+            // Extract comment lines at the end of the file
+            const lines = existingContent.split(/\r?\n/);
+            let foundConfig = false;
+            for (let i = lines.length - 1; i >= 0; i--) {
+                const line = lines[i].trim();
+                if (line.startsWith('#') || line === '') {
+                    if (foundConfig) break;
+                } else {
+                    foundConfig = true;
+                }
+            }
+        }
+        
+        // Build new config content
+        const lines = [];
+        
+        // Define the order of config keys
+        const keyOrder = [
+            'MACADDRESS',
+            'CALLSIGN',
+            'BBS_STATION_ID',
+            'ECHO_STATION_ID',
+            'WINLINK_STATION_ID',
+            'WINLINK_PASSWORD',
+            'WINLINK_SERVER',
+            'WINLINK_PORT',
+            'WINLINK_USE_TLS',
+            'MQTT_BROKER_URL',
+            'MQTT_TOPIC',
+            'MQTT_USERNAME',
+            'MQTT_PASSWORD',
+            'WEBSERVERPORT'
+        ];
+        
+        // Write keys in order
+        for (const key of keyOrder) {
+            if (config[key] !== undefined && config[key] !== '') {
+                lines.push(`${key}=${config[key]}`);
+            }
+        }
+        
+        // Write AUTH entries
+        if (config.AUTH && Array.isArray(config.AUTH)) {
+            for (const auth of config.AUTH) {
+                lines.push(`AUTH=${auth}`);
+            }
+        }
+        
+        // Add empty line before comments section
+        lines.push('');
+        
+        // Add console message filtering section
+        lines.push('# Console message filtering - Controls which types of console messages are displayed');
+        lines.push('# Available categories: App, Radio, RadioCtl, MQTT, WebServer, BBS, APRS, WinLink, Echo, Storage, YAPP, Session, Bulletin, Files, Mail, Joke');
+        lines.push('# Use comma-separated list to enable multiple categories, or "ALL" to show all messages');
+        lines.push('');
+        lines.push('# Example: CONSOLEMSG=WebServer,MQTT,APRS');
+        lines.push('# Leave empty or omit to show all messages');
+        lines.push('#CONSOLEMSG=ALL');
+        
+        if (config.CONSOLEMSG !== undefined && config.CONSOLEMSG !== '') {
+            lines.push(`CONSOLEMSG=${config.CONSOLEMSG}`);
+        } else {
+            lines.push('CONSOLEMSG=NONE');
+        }
+        
+        // Write the file
+        fs.writeFileSync(configPath, lines.join('\n') + '\n');
     }
 }
 

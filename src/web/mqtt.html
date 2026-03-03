@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MQTT Monitor - Home Assistant</title>
+    <title>MQTT Current State</title>
     <style>
         * {
             margin: 0;
@@ -50,6 +50,16 @@
             display: flex;
             align-items: center;
             gap: 12px;
+        }
+        
+        .header-controls a {
+            color: #3498db;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        
+        .header-controls a:hover {
+            text-decoration: underline;
         }
         
         .connection-status {
@@ -110,7 +120,7 @@
             flex-wrap: wrap;
             gap: 15px;
             align-items: center;
-            margin-bottom: 12px;
+            margin-bottom: 15px;
             padding: 10px 15px;
             background: rgba(255, 255, 255, 0.03);
             border: 1px solid rgba(255, 255, 255, 0.08);
@@ -143,11 +153,6 @@
             color: #e74c3c;
         }
         
-        .status-item .value.connecting,
-        .status-item .value.reconnecting {
-            color: #f1c40f;
-        }
-        
         .status-item .value.mono {
             font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
             font-size: 12px;
@@ -175,18 +180,7 @@
         .stat-inline .num {
             font-size: 16px;
             font-weight: 600;
-        }
-        
-        .stat-inline .num.publish {
-            color: #2ecc71;
-        }
-        
-        .stat-inline .num.receive {
-            color: #9b59b6;
-        }
-        
-        .stat-inline .num.error {
-            color: #e74c3c;
+            color: #3498db;
         }
         
         .stat-inline .lbl {
@@ -195,255 +189,100 @@
             text-transform: uppercase;
         }
         
-        .messages-container {
-            background: rgba(0, 0, 0, 0.3);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 12px;
-            overflow: hidden;
-            margin-bottom: 20px;
-        }
-        
-        .messages-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 15px 20px;
-            background: rgba(255, 255, 255, 0.05);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        }
-        
-        .messages-header h2 {
+        .section-title {
             font-size: 16px;
             font-weight: 500;
+            color: #fff;
+            margin-bottom: 12px;
             display: flex;
             align-items: center;
             gap: 8px;
         }
         
-        .messages-header .live-indicator {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 12px;
-            color: #2ecc71;
-            background: rgba(46, 204, 113, 0.1);
-            padding: 4px 10px;
-            border-radius: 20px;
+        .values-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
         }
         
-        .messages-header .live-indicator .dot {
-            width: 6px;
-            height: 6px;
-            background: #2ecc71;
-            border-radius: 50%;
-            animation: pulse 1.5s infinite;
+        .value-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 15px;
+            transition: all 0.3s ease;
         }
         
-        .header-buttons {
-            display: flex;
-            gap: 10px;
-            align-items: center;
+        .value-card:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(52, 152, 219, 0.3);
         }
         
-        button {
-            padding: 7px 14px;
-            border-radius: 6px;
-            font-size: 13px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s;
-            border: none;
+        .value-card.updated {
+            animation: highlight 1s ease-out;
         }
         
-        .btn-secondary {
-            background: rgba(255, 255, 255, 0.1);
-            color: #fff;
-            border: 1px solid rgba(255, 255, 255, 0.2);
+        @keyframes highlight {
+            0% { background: rgba(46, 204, 113, 0.3); }
+            100% { background: rgba(255, 255, 255, 0.05); }
         }
         
-        .btn-secondary:hover {
-            background: rgba(255, 255, 255, 0.15);
-        }
-        
-        .filter-bar {
-            display: flex;
-            gap: 10px;
-            padding: 12px 20px;
-            background: rgba(255, 255, 255, 0.02);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        }
-        
-        .filter-bar input, .filter-bar select {
-            background: rgba(0, 0, 0, 0.3);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            color: #fff;
-            padding: 6px 10px;
-            border-radius: 5px;
-            font-size: 13px;
-            outline: none;
-            transition: border-color 0.2s;
-        }
-        
-        .filter-bar input {
-            flex: 1;
-            min-width: 150px;
-        }
-        
-        .filter-bar input:focus, .filter-bar select:focus {
-            border-color: #3498db;
-        }
-        
-        .checkbox-wrapper {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .checkbox-wrapper input[type="checkbox"] {
-            width: 18px;
-            height: 18px;
-            cursor: pointer;
-        }
-        
-        .checkbox-wrapper label {
-            font-size: 13px;
-            color: #aaa;
-        }
-        
-        .messages-list {
-            max-height: calc(100vh - 320px);
-            min-height: 400px;
-            overflow-y: auto;
-        }
-        
-        .messages-list::-webkit-scrollbar {
-            width: 8px;
-        }
-        
-        .messages-list::-webkit-scrollbar-track {
-            background: rgba(0, 0, 0, 0.2);
-        }
-        
-        .messages-list::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.2);
-            border-radius: 4px;
-        }
-        
-        .messages-list::-webkit-scrollbar-thumb:hover {
-            background: rgba(255, 255, 255, 0.3);
-        }
-        
-        .message-item {
-            padding: 14px 20px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        
-        .message-item:hover {
-            background: rgba(255, 255, 255, 0.03);
-        }
-        
-        .message-item.expanded {
-            background: rgba(52, 152, 219, 0.1);
-        }
-        
-        .message-item.published {
-            border-left: 3px solid #2ecc71;
-        }
-        
-        .message-item.received {
-            border-left: 3px solid #9b59b6;
-        }
-        
-        .message-item.error {
-            border-left: 3px solid #e74c3c;
-        }
-        
-        .message-header {
+        .value-card-header {
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            gap: 15px;
+            margin-bottom: 10px;
         }
         
-        .message-info {
-            flex: 1;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            flex-wrap: wrap;
-        }
-        
-        .message-direction {
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 11px;
-            font-weight: 500;
-        }
-        
-        .message-direction.published {
-            background: rgba(46, 204, 113, 0.2);
-            color: #2ecc71;
-        }
-        
-        .message-direction.received {
-            background: rgba(155, 89, 182, 0.2);
-            color: #9b59b6;
-        }
-        
-        .message-direction.error {
-            background: rgba(231, 76, 60, 0.2);
-            color: #e74c3c;
-        }
-        
-        .message-topic {
-            font-weight: 600;
-            color: #3498db;
-            font-size: 14px;
+        .value-topic {
             font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 12px;
+            color: #3498db;
+            word-break: break-all;
+            flex: 1;
         }
         
-        .message-time {
-            font-size: 12px;
+        .value-timestamp {
+            font-size: 11px;
             color: #666;
             white-space: nowrap;
+            margin-left: 10px;
         }
         
-        .message-preview {
-            font-size: 13px;
-            color: #888;
-            margin-top: 6px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            max-width: 100%;
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-        }
-        
-        .message-details {
-            display: none;
-            margin-top: 12px;
-            padding: 12px;
+        .value-content {
             background: rgba(0, 0, 0, 0.3);
             border-radius: 8px;
+            padding: 12px;
             font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
             font-size: 12px;
+            color: #98c379;
             white-space: pre-wrap;
             word-break: break-all;
-            color: #98c379;
-            max-height: 300px;
+            max-height: 200px;
             overflow-y: auto;
         }
         
-        .message-item.expanded .message-details {
-            display: block;
+        .value-content::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        .value-content::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+        }
+        
+        .value-content::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
         }
         
         .empty-state {
             text-align: center;
             padding: 60px 20px;
             color: #666;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
         }
         
         .empty-state .icon {
@@ -456,34 +295,72 @@
             font-size: 14px;
         }
         
-        .tab-bar {
+        .filter-section {
             display: flex;
-            gap: 5px;
-            background: rgba(0, 0, 0, 0.2);
-            padding: 5px;
-            border-radius: 8px;
+            gap: 10px;
             margin-bottom: 15px;
+            flex-wrap: wrap;
         }
         
-        .tab-btn {
-            padding: 8px 16px;
-            border: none;
-            background: transparent;
-            color: #888;
-            cursor: pointer;
+        .filter-input {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #fff;
+            padding: 8px 12px;
             border-radius: 6px;
             font-size: 13px;
+            outline: none;
+            flex: 1;
+            min-width: 200px;
+        }
+        
+        .filter-input:focus {
+            border-color: #3498db;
+        }
+        
+        .filter-buttons {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .filter-btn {
+            padding: 8px 16px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
             transition: all 0.2s;
         }
         
-        .tab-btn.active {
-            background: rgba(52, 152, 219, 0.2);
+        .filter-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+        
+        .filter-btn.active {
+            background: rgba(52, 152, 219, 0.3);
+            border-color: #3498db;
             color: #3498db;
         }
         
-        .tab-btn:hover:not(.active) {
-            background: rgba(255, 255, 255, 0.05);
-            color: #fff;
+        .live-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: #2ecc71;
+            background: rgba(46, 204, 113, 0.1);
+            padding: 4px 10px;
+            border-radius: 20px;
+        }
+        
+        .live-indicator .dot {
+            width: 6px;
+            height: 6px;
+            background: #2ecc71;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
         }
         
         @media (max-width: 768px) {
@@ -493,17 +370,18 @@
                 text-align: center;
             }
             
-            .mqtt-status-panel {
-                grid-template-columns: 1fr;
-            }
-            
-            .stats-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
-            
-            .broker-info .info-row {
+            .compact-header {
                 flex-direction: column;
-                gap: 10px;
+                align-items: flex-start;
+            }
+            
+            .stats-inline {
+                margin-left: 0;
+                margin-top: 10px;
+            }
+            
+            .values-grid {
+                grid-template-columns: 1fr;
             }
         }
     </style>
@@ -512,19 +390,20 @@
     <div class="container">
         <header>
             <h1>
-                <span class="icon">🏠</span>
-                MQTT Monitor - Home Assistant
+                <span class="icon">📊</span>
+                MQTT Current State
             </h1>
             <div class="header-controls">
-                <a href="index.html" style="color: #3498db; text-decoration: none; font-size: 14px;">🏠 Home</a>
+                <a href="mqttmonitor.html">📨 Message Monitor</a>
+                <a href="index.html">🏠 Home</a>
                 <div id="wsConnectionStatus" class="connection-status disconnected">
                     <span class="status-dot"></span>
-                    <span id="wsStatusText">WS Disconnected</span>
+                    <span id="wsStatusText">Disconnected</span>
                 </div>
             </div>
         </header>
         
-        <!-- Compact Status Bar -->
+        <!-- Status Bar -->
         <div class="compact-header">
             <div class="status-item">
                 <span class="label">MQTT</span>
@@ -537,70 +416,38 @@
             </div>
             <div class="divider"></div>
             <div class="status-item">
-                <span class="label">Topic</span>
+                <span class="label">Base Topic</span>
                 <span id="baseTopic" class="value mono">-</span>
-            </div>
-            <div class="divider"></div>
-            <div class="status-item">
-                <span class="label">Uptime</span>
-                <span id="mqttUptime" class="value mono">-</span>
             </div>
             <div class="stats-inline">
                 <div class="stat-inline">
-                    <span id="publishCount" class="num publish">0</span>
-                    <span class="lbl">out</span>
+                    <span id="valueCount" class="num">0</span>
+                    <span class="lbl">values</span>
                 </div>
-                <div class="stat-inline">
-                    <span id="receiveCount" class="num receive">0</span>
-                    <span class="lbl">in</span>
-                </div>
-                <div class="stat-inline">
-                    <span id="errorCount" class="num error">0</span>
-                    <span class="lbl">err</span>
-                </div>
-                <div class="stat-inline">
-                    <span id="totalMessages" class="num">0</span>
-                    <span class="lbl">total</span>
-                </div>
+                <span class="live-indicator">
+                    <span class="dot"></span>
+                    LIVE
+                </span>
             </div>
         </div>
         
-        <!-- Tab Bar -->
-        <div class="tab-bar">
-            <button class="tab-btn active" data-tab="all">All Messages</button>
-            <button class="tab-btn" data-tab="published">Published</button>
-            <button class="tab-btn" data-tab="received">Received</button>
-            <button class="tab-btn" data-tab="errors">Errors</button>
+        <!-- Filter Section -->
+        <div class="filter-section">
+            <input type="text" id="filterInput" class="filter-input" placeholder="Filter by topic...">
+            <div class="filter-buttons">
+                <button class="filter-btn" data-filter="all">All</button>
+                <button class="filter-btn active" data-filter="state">State Topics</button>
+                <button class="filter-btn" data-filter="config">Config Topics</button>
+            </div>
         </div>
         
-        <!-- Messages -->
-        <div class="messages-container">
-            <div class="messages-header">
-                <h2>
-                    📨 MQTT Messages
-                    <span class="live-indicator">
-                        <span class="dot"></span>
-                        LIVE
-                    </span>
-                </h2>
-                <div class="header-buttons">
-                    <div class="checkbox-wrapper">
-                        <input type="checkbox" id="autoscroll" checked>
-                        <label for="autoscroll">Auto-scroll</label>
-                    </div>
-                    <button id="clearBtn" class="btn-secondary">Clear</button>
-                </div>
-            </div>
-            
-            <div class="filter-bar">
-                <input type="text" id="filterText" placeholder="Filter by topic or payload...">
-            </div>
-            
-            <div id="messagesList" class="messages-list">
-                <div class="empty-state">
-                    <div class="icon">📭</div>
-                    <p>No MQTT messages yet. Waiting for MQTT activity...</p>
-                </div>
+        <!-- State Values Section -->
+        <div class="section-title">📊 Current MQTT Values</div>
+        <div id="valuesGrid" class="values-grid">
+            <div class="empty-state">
+                <div class="icon">📭</div>
+                <p>No MQTT values yet. Waiting for MQTT activity...</p>
+                <p style="margin-top: 10px; font-size: 12px;">Values will appear here as they are published.</p>
             </div>
         </div>
     </div>
@@ -608,28 +455,21 @@
     <script>
         // State
         let ws = null;
-        let messages = [];
+        let mqttValues = new Map(); // Map of topic -> { payload, timestamp }
         let mqttStats = null;
-        let currentTab = 'all';
+        let currentFilter = 'state';
+        let textFilter = '';
         
         // DOM Elements
         const wsConnectionStatus = document.getElementById('wsConnectionStatus');
         const wsStatusText = document.getElementById('wsStatusText');
         const mqttStatusEl = document.getElementById('mqttStatus');
-        const mqttStatusTimeEl = document.getElementById('mqttStatusTime');
-        const mqttConnectTimeEl = document.getElementById('mqttConnectTime');
-        const mqttUptimeEl = document.getElementById('mqttUptime');
         const brokerUrlEl = document.getElementById('brokerUrl');
         const baseTopicEl = document.getElementById('baseTopic');
-        const publishCountEl = document.getElementById('publishCount');
-        const receiveCountEl = document.getElementById('receiveCount');
-        const errorCountEl = document.getElementById('errorCount');
-        const totalMessagesEl = document.getElementById('totalMessages');
-        const messagesList = document.getElementById('messagesList');
-        const filterText = document.getElementById('filterText');
-        const autoscrollCheck = document.getElementById('autoscroll');
-        const clearBtn = document.getElementById('clearBtn');
-        const tabBtns = document.querySelectorAll('.tab-btn');
+        const valueCountEl = document.getElementById('valueCount');
+        const valuesGrid = document.getElementById('valuesGrid');
+        const filterInput = document.getElementById('filterInput');
+        const filterButtons = document.querySelectorAll('.filter-btn');
         
         // Connect to WebSocket
         function connect() {
@@ -642,7 +482,6 @@
             
             ws.onopen = () => {
                 updateWsConnectionStatus('connected');
-                // Subscribe to MQTT events
                 setTimeout(() => {
                     subscribeToMqttEvents();
                 }, 100);
@@ -669,22 +508,24 @@
         
         function updateWsConnectionStatus(status) {
             wsConnectionStatus.className = 'connection-status ' + status;
-            wsStatusText.textContent = 'WS ' + status.charAt(0).toUpperCase() + status.slice(1);
+            wsStatusText.textContent = status.charAt(0).toUpperCase() + status.slice(1);
         }
         
         function subscribeToMqttEvents() {
             if (!ws || ws.readyState !== WebSocket.OPEN) return;
             
-            // Subscribe to all MQTT events
+            console.log('[MQTT State] Subscribing to MQTT events...');
+            
+            // Subscribe to MQTT events
             const mqttEvents = [
                 'mqtt:status',
-                'mqtt:published',
-                'mqtt:received',
-                'mqtt:error',
-                'mqtt:stats'
+                'mqtt:stats',
+                'mqtt:valuechange',   // New event for value changes
+                'mqtt:published'      // Also catch published events to capture values
             ];
             
             for (const event of mqttEvents) {
+                console.log(`[MQTT State] Subscribing to: ${event}`);
                 ws.send(JSON.stringify({
                     action: 'subscribe',
                     deviceId: 0,
@@ -692,17 +533,27 @@
                 }));
             }
             
-            // Also get current stats value
+            // Get current stats
+            console.log('[MQTT State] Requesting mqtt:stats...');
             ws.send(JSON.stringify({
                 action: 'getValue',
                 deviceId: 0,
                 name: 'mqtt:stats'
             }));
             
+            console.log('[MQTT State] Requesting mqtt:status...');
             ws.send(JSON.stringify({
                 action: 'getValue',
                 deviceId: 0,
                 name: 'mqtt:status'
+            }));
+            
+            // Get last stored values (populated on page load)
+            console.log('[MQTT State] Requesting mqtt:lastvalues...');
+            ws.send(JSON.stringify({
+                action: 'getValue',
+                deviceId: 0,
+                name: 'mqtt:lastvalues'
             }));
         }
         
@@ -717,12 +568,19 @@
                     break;
                     
                 case 'getValueResult':
+                    console.log(`[MQTT State] getValueResult for ${data.name}: success=${data.success}, exists=${data.exists}`, data.value);
                     if (data.success && data.exists) {
                         if (data.name === 'mqtt:stats') {
                             updateMqttStats(data.value);
                         } else if (data.name === 'mqtt:status') {
                             updateMqttStatus(data.value);
+                        } else if (data.name === 'mqtt:lastvalues') {
+                            // Load all stored values on page load
+                            console.log('[MQTT State] Loading last values from DataBroker:', data.value);
+                            loadLastValues(data.value);
                         }
+                    } else {
+                        console.log(`[MQTT State] getValue for ${data.name} - not found or failed`);
                     }
                     break;
                     
@@ -740,6 +598,8 @@
             const eventName = data.name;
             const eventData = data.data;
             
+            console.log(`[MQTT State] Received event: ${eventName}`, eventData);
+            
             switch (eventName) {
                 case 'mqtt:status':
                     updateMqttStatus(eventData);
@@ -749,16 +609,13 @@
                     updateMqttStats(eventData);
                     break;
                     
+                case 'mqtt:valuechange':
                 case 'mqtt:published':
-                    addMessage('published', eventData);
-                    break;
-                    
-                case 'mqtt:received':
-                    addMessage('received', eventData);
-                    break;
-                    
-                case 'mqtt:error':
-                    addMessage('error', eventData);
+                    // Update the value for this topic
+                    if (eventData.topic && eventData.payload !== undefined) {
+                        console.log(`[MQTT State] Updating value for topic: ${eventData.topic}`);
+                        updateValue(eventData.topic, eventData.payload, eventData.timestamp);
+                    }
                     break;
             }
         }
@@ -769,10 +626,6 @@
             const status = statusData.status || 'unknown';
             mqttStatusEl.textContent = status.charAt(0).toUpperCase() + status.slice(1);
             mqttStatusEl.className = 'value ' + status;
-            
-            if (statusData.timestamp) {
-                mqttStatusTimeEl.textContent = 'Last update: ' + new Date(statusData.timestamp).toLocaleTimeString();
-            }
             
             if (statusData.brokerUrl) {
                 brokerUrlEl.textContent = statusData.brokerUrl;
@@ -787,127 +640,171 @@
             if (!stats) return;
             mqttStats = stats;
             
-            // Update connection status
             const status = stats.connected ? 'connected' : 'disconnected';
             mqttStatusEl.textContent = status.charAt(0).toUpperCase() + status.slice(1);
             mqttStatusEl.className = 'value ' + status;
             
-            // Update broker info
             if (stats.brokerUrl) {
                 brokerUrlEl.textContent = stats.brokerUrl;
             }
             if (stats.baseTopic) {
                 baseTopicEl.textContent = stats.baseTopic;
             }
-            
-            // Update connect time
-            if (stats.connectTime) {
-                mqttConnectTimeEl.textContent = new Date(stats.connectTime).toLocaleString();
-                
-                // Calculate uptime
-                if (stats.connected) {
-                    const uptimeMs = Date.now() - new Date(stats.connectTime).getTime();
-                    mqttUptimeEl.textContent = 'Uptime: ' + formatUptime(uptimeMs / 1000);
-                } else {
-                    mqttUptimeEl.textContent = '-';
-                }
-            }
-            
-            // Update statistics
-            publishCountEl.textContent = (stats.publishCount || 0).toLocaleString();
-            receiveCountEl.textContent = (stats.receiveCount || 0).toLocaleString();
-            errorCountEl.textContent = (stats.errorCount || 0).toLocaleString();
-            totalMessagesEl.textContent = messages.length.toLocaleString();
         }
         
-        function addMessage(type, eventData) {
-            const messageItem = {
-                id: Date.now() + Math.random(),
-                type: type,
-                topic: eventData.topic || (type === 'error' ? 'Error' : 'Unknown'),
-                payload: eventData.payload || eventData.error || eventData,
-                timestamp: eventData.timestamp || new Date().toISOString()
-            };
+        function loadLastValues(values) {
+            console.log('[MQTT State] loadLastValues called with:', values);
             
-            messages.unshift(messageItem);
-            
-            // Limit to 500 messages
-            if (messages.length > 500) {
-                messages.pop();
+            if (!values || typeof values !== 'object') {
+                console.log('[MQTT State] loadLastValues: Invalid or empty values object');
+                return;
             }
             
-            totalMessagesEl.textContent = messages.length.toLocaleString();
-            renderMessages();
+            const entries = Object.entries(values);
+            console.log(`[MQTT State] Loading ${entries.length} values from storage`);
+            
+            // Load all stored values
+            for (const [topic, data] of entries) {
+                console.log(`[MQTT State] Loading topic: ${topic}`, data);
+                mqttValues.set(topic, {
+                    payload: data.payload,
+                    timestamp: data.timestamp
+                });
+            }
+            
+            valueCountEl.textContent = mqttValues.size;
+            renderValues();
+            console.log(`[MQTT State] Loaded ${mqttValues.size} stored MQTT values total`);
         }
         
-        function renderMessages() {
-            const filter = filterText.value.toLowerCase();
+        function updateValue(topic, payload, timestamp) {
+            const isNewTopic = !mqttValues.has(topic);
             
-            let filtered = messages.filter(msg => {
-                // Tab filter
-                if (currentTab === 'published' && msg.type !== 'published') return false;
-                if (currentTab === 'received' && msg.type !== 'received') return false;
-                if (currentTab === 'errors' && msg.type !== 'error') return false;
-                
-                // Text filter
-                if (filter) {
-                    const msgStr = JSON.stringify(msg).toLowerCase();
-                    if (!msgStr.includes(filter)) return false;
-                }
-                
-                return true;
+            mqttValues.set(topic, {
+                payload: payload,
+                timestamp: timestamp || new Date().toISOString()
             });
             
-            if (filtered.length === 0) {
-                messagesList.innerHTML = `
+            valueCountEl.textContent = mqttValues.size;
+            
+            // Re-render and highlight the updated card
+            renderValues(isNewTopic ? null : topic);
+        }
+        
+        function renderValues(highlightTopic = null) {
+            // Filter values based on current filters
+            let filteredEntries = Array.from(mqttValues.entries());
+            
+            // Apply text filter
+            if (textFilter) {
+                const lowerFilter = textFilter.toLowerCase();
+                filteredEntries = filteredEntries.filter(([topic]) => 
+                    topic.toLowerCase().includes(lowerFilter)
+                );
+            }
+            
+            // Apply category filter
+            // Config topics: Home Assistant discovery configs (end with /config or start with homeassistant/sensor, homeassistant/switch, etc.)
+            // State topics: Actual state values (not discovery configs)
+            if (currentFilter === 'state') {
+                filteredEntries = filteredEntries.filter(([topic]) => 
+                    !topic.includes('/config')
+                );
+            } else if (currentFilter === 'config') {
+                filteredEntries = filteredEntries.filter(([topic]) => 
+                    topic.includes('/config')
+                );
+            }
+            
+            // Sort by topic
+            filteredEntries.sort((a, b) => a[0].localeCompare(b[0]));
+            
+            if (filteredEntries.length === 0) {
+                valuesGrid.innerHTML = `
                     <div class="empty-state">
                         <div class="icon">📭</div>
-                        <p>${messages.length === 0 ? 'No MQTT messages yet. Waiting for MQTT activity...' : 'No messages match your filter.'}</p>
+                        <p>${mqttValues.size === 0 ? 'No MQTT values yet. Waiting for MQTT activity...' : 'No values match your filter.'}</p>
                     </div>
                 `;
                 return;
             }
             
-            messagesList.innerHTML = filtered.slice(0, 100).map(msg => {
-                const time = new Date(msg.timestamp).toLocaleTimeString();
-                const preview = formatPreview(msg.payload);
-                const details = formatDetails(msg.payload);
-                const directionLabel = msg.type === 'published' ? '↑ OUT' : 
-                                       msg.type === 'received' ? '↓ IN' : '⚠ ERR';
+            valuesGrid.innerHTML = filteredEntries.map(([topic, data]) => {
+                const time = new Date(data.timestamp).toLocaleTimeString();
+                const payloadStr = formatPayload(data.payload);
+                const isHighlighted = topic === highlightTopic;
                 
                 return `
-                    <div class="message-item ${msg.type}" onclick="toggleMessage(this)">
-                        <div class="message-header">
-                            <div class="message-info">
-                                <span class="message-direction ${msg.type}">${directionLabel}</span>
-                                <span class="message-topic">${escapeHtml(msg.topic)}</span>
-                            </div>
-                            <span class="message-time">${time}</span>
+                    <div class="value-card${isHighlighted ? ' updated' : ''}" data-topic="${escapeHtml(topic)}">
+                        <div class="value-card-header">
+                            <div class="value-topic">${escapeHtml(topic)}</div>
+                            <div class="value-timestamp">${time}</div>
                         </div>
-                        <div class="message-preview">${escapeHtml(preview)}</div>
-                        <div class="message-details">${escapeHtml(details)}</div>
+                        <div class="value-content">${escapeHtml(payloadStr)}</div>
                     </div>
                 `;
             }).join('');
+        }
+        
+        function formatPayload(payload) {
+            if (payload === null || payload === undefined) return 'null';
+            if (typeof payload === 'object') {
+                // Filter out verbose/internal fields for cleaner display
+                const filteredPayload = filterPayloadFields(payload);
+                // Format as key: value pairs without JSON braces
+                return formatAsKeyValues(filteredPayload);
+            }
+            return String(payload);
+        }
+        
+        function formatAsKeyValues(obj) {
+            if (typeof obj !== 'object' || obj === null) return String(obj);
+            if (Array.isArray(obj)) return JSON.stringify(obj, null, 2);
             
-            if (autoscrollCheck.checked) {
-                messagesList.scrollTop = 0;
-            }
+            const entries = Object.entries(obj);
+            if (entries.length === 0) return '(empty)';
+            
+            // Format as key: value pairs
+            return entries.map(([key, value]) => {
+                let valueStr;
+                if (typeof value === 'object' && value !== null) {
+                    valueStr = JSON.stringify(value);
+                } else if (typeof value === 'string') {
+                    valueStr = value;
+                } else {
+                    valueStr = String(value);
+                }
+                return `${key}: ${valueStr}`;
+            }).join('\n');
         }
         
-        function formatPreview(data) {
-            if (data === null || data === undefined) return 'null';
-            if (typeof data === 'object') return JSON.stringify(data).slice(0, 150);
-            return String(data).slice(0, 150);
-        }
-        
-        function formatDetails(data) {
-            if (data === null || data === undefined) return 'null';
-            try {
-                return JSON.stringify(data, null, 2);
-            } catch {
-                return String(data);
+        function filterPayloadFields(obj) {
+            // Fields to exclude from display (verbose/internal)
+            const excludeFields = [
+                'unique_id',
+                'device',
+                'value_template',
+                'identifiers',
+                'manufacturer',
+                'model'
+            ];
+            
+            // If it's not an object, return as-is
+            if (typeof obj !== 'object' || obj === null) return obj;
+            
+            // If it's an array, filter each element
+            if (Array.isArray(obj)) {
+                return obj.map(item => filterPayloadFields(item));
             }
+            
+            // Filter object fields
+            const filtered = {};
+            for (const [key, value] of Object.entries(obj)) {
+                if (!excludeFields.includes(key)) {
+                    filtered[key] = value;
+                }
+            }
+            return filtered;
         }
         
         function escapeHtml(text) {
@@ -916,50 +813,18 @@
             return div.innerHTML;
         }
         
-        function toggleMessage(element) {
-            element.classList.toggle('expanded');
-        }
-        
-        function formatUptime(seconds) {
-            const days = Math.floor(seconds / 86400);
-            const hours = Math.floor((seconds % 86400) / 3600);
-            const minutes = Math.floor((seconds % 3600) / 60);
-            const secs = Math.floor(seconds % 60);
-            
-            let result = '';
-            if (days > 0) result += `${days}d `;
-            if (hours > 0) result += `${hours}h `;
-            if (minutes > 0) result += `${minutes}m `;
-            result += `${secs}s`;
-            
-            return result.trim();
-        }
-        
-        // Update uptime every second
-        setInterval(() => {
-            if (mqttStats && mqttStats.connected && mqttStats.connectTime) {
-                const uptimeMs = Date.now() - new Date(mqttStats.connectTime).getTime();
-                mqttUptimeEl.textContent = 'Uptime: ' + formatUptime(uptimeMs / 1000);
-            }
-        }, 1000);
-        
         // Event Listeners
-        clearBtn.addEventListener('click', () => {
-            messages = [];
-            totalMessagesEl.textContent = '0';
-            renderMessages();
+        filterInput.addEventListener('input', (e) => {
+            textFilter = e.target.value;
+            renderValues();
         });
         
-        filterText.addEventListener('input', () => {
-            renderMessages();
-        });
-        
-        tabBtns.forEach(btn => {
+        filterButtons.forEach(btn => {
             btn.addEventListener('click', () => {
-                tabBtns.forEach(b => b.classList.remove('active'));
+                filterButtons.forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
-                currentTab = btn.dataset.tab;
-                renderMessages();
+                currentFilter = btn.dataset.filter;
+                renderValues();
             });
         });
         

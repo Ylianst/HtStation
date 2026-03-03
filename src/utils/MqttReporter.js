@@ -41,6 +41,9 @@ class MqttReporter {
             lastError: null
         };
         
+        // Track last sent values for each topic
+        this.lastValues = new Map();
+        
         // Dispatch initial status
         this._dispatchStatus('disconnected');
         this._dispatchStats();
@@ -193,6 +196,48 @@ class MqttReporter {
             this._dispatchPublished(topic, payload);
             this._dispatchStats();
         }
+        
+        // Store last value for this topic (even if not connected, track what would be sent)
+        const timestamp = new Date().toISOString();
+        this.lastValues.set(topic, {
+            topic: topic,
+            payload: payload,
+            timestamp: timestamp
+        });
+        
+        // Store all last values in DataBroker for retrieval by web clients
+        DataBroker.dispatch(0, 'mqtt:lastvalues', this.getLastValues(), true);
+        
+        // Dispatch value change event for real-time updates
+        DataBroker.dispatch(0, 'mqtt:valuechange', {
+            topic: topic,
+            payload: payload,
+            timestamp: timestamp
+        }, false);
+    }
+    
+    /**
+     * Get all last sent values
+     * @returns {Object} Object with topics as keys and {payload, timestamp} as values
+     */
+    getLastValues() {
+        const result = {};
+        for (const [topic, data] of this.lastValues) {
+            result[topic] = {
+                payload: data.payload,
+                timestamp: data.timestamp
+            };
+        }
+        return result;
+    }
+    
+    /**
+     * Get last value for a specific topic
+     * @param {string} topic - The MQTT topic
+     * @returns {Object|null} The last value data or null if not found
+     */
+    getLastValue(topic) {
+        return this.lastValues.get(topic) || null;
     }
 
     // Home Assistant Discovery methods

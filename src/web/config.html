@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configuration - HtStation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e0e0e0;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        
+        h1 {
+            font-size: 36px;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+        }
+        
+        h1 .icon {
+            font-size: 40px;
+        }
+        
+        .subtitle {
+            font-size: 16px;
+            color: #888;
+            font-weight: 400;
+        }
+        
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #3498db;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        
+        .config-section {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+        
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            user-select: none;
+            padding: 4px 0;
+        }
+        
+        .section-title:hover {
+            opacity: 0.9;
+        }
+        
+        .section-title .icon {
+            font-size: 24px;
+        }
+        
+        .section-title .collapse-icon {
+            margin-left: auto;
+            font-size: 14px;
+            color: #888;
+            transition: transform 0.2s;
+        }
+        
+        .section-title.collapsed .collapse-icon {
+            transform: rotate(-90deg);
+        }
+        
+        .section-content {
+            margin-top: 20px;
+            overflow: hidden;
+            transition: max-height 0.3s ease, opacity 0.2s ease;
+        }
+        
+        .section-content.collapsed {
+            max-height: 0 !important;
+            opacity: 0;
+            margin-top: 0;
+        }
+        
+        .form-group {
+            margin-bottom: 16px;
+        }
+        
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            color: #aaa;
+            margin-bottom: 6px;
+            font-weight: 500;
+        }
+        
+        .form-group input[type="text"],
+        .form-group input[type="number"],
+        .form-group input[type="password"],
+        .form-group select {
+            width: 100%;
+            padding: 10px 14px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 8px;
+            color: #fff;
+            font-size: 14px;
+            transition: border-color 0.2s, background-color 0.2s;
+        }
+        
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #3498db;
+            background: rgba(0, 0, 0, 0.4);
+        }
+        
+        .form-group input:disabled,
+        .form-group select:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            background: rgba(0, 0, 0, 0.2);
+        }
+        
+        .form-group .hint {
+            font-size: 11px;
+            color: #666;
+            margin-top: 4px;
+        }
+        
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        
+        @media (max-width: 600px) {
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .checkbox-group input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: #3498db;
+        }
+        
+        .checkbox-group label {
+            margin-bottom: 0;
+            color: #e0e0e0;
+        }
+        
+        .auth-list {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            padding: 12px;
+        }
+        
+        .auth-entry {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+            align-items: center;
+        }
+        
+        .auth-entry:last-child {
+            margin-bottom: 0;
+        }
+        
+        .auth-entry input {
+            flex: 1;
+            padding: 8px 12px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 6px;
+            color: #fff;
+            font-size: 13px;
+        }
+        
+        .auth-entry input:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+        
+        .auth-entry .remove-btn {
+            background: rgba(231, 76, 60, 0.2);
+            border: 1px solid rgba(231, 76, 60, 0.4);
+            color: #e74c3c;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        
+        .auth-entry .remove-btn:hover {
+            background: rgba(231, 76, 60, 0.3);
+        }
+        
+        .add-auth-btn {
+            background: rgba(46, 204, 113, 0.2);
+            border: 1px solid rgba(46, 204, 113, 0.4);
+            color: #2ecc71;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            margin-top: 10px;
+            transition: all 0.2s;
+        }
+        
+        .add-auth-btn:hover {
+            background: rgba(46, 204, 113, 0.3);
+        }
+        
+        .section-disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+        
+        .section-toggle {
+            margin-left: auto;
+            font-size: 12px;
+            color: #888;
+            font-weight: normal;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 12px;
+            margin-top: 30px;
+            justify-content: flex-end;
+        }
+        
+        .btn {
+            padding: 12px 28px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+        }
+        
+        .btn-primary {
+            background: #3498db;
+            color: #fff;
+        }
+        
+        .btn-primary:hover {
+            background: #2980b9;
+        }
+        
+        .btn-primary:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+        
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: #e0e0e0;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+        
+        .status-message {
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            display: none;
+        }
+        
+        .status-message.success {
+            display: block;
+            background: rgba(46, 204, 113, 0.2);
+            border: 1px solid rgba(46, 204, 113, 0.4);
+            color: #2ecc71;
+        }
+        
+        .status-message.error {
+            display: block;
+            background: rgba(231, 76, 60, 0.2);
+            border: 1px solid rgba(231, 76, 60, 0.4);
+            color: #e74c3c;
+        }
+        
+        .status-message.warning {
+            display: block;
+            background: rgba(241, 196, 15, 0.2);
+            border: 1px solid rgba(241, 196, 15, 0.4);
+            color: #f1c40f;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+        
+        .loading::after {
+            content: '';
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #888;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+            vertical-align: middle;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            color: #666;
+            font-size: 13px;
+        }
+        
+        footer a {
+            color: #3498db;
+            text-decoration: none;
+        }
+        
+        footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="index.html" class="back-link">← Back to Dashboard</a>
+        
+        <header>
+            <h1>
+                <span class="icon">⚙️</span>
+                Configuration
+            </h1>
+            <p class="subtitle">Manage HtStation settings</p>
+        </header>
+        
+        <div id="statusMessage" class="status-message"></div>
+        
+        <div id="loadingState" class="loading">Loading configuration...</div>
+        
+        <form id="configForm" style="display: none;">
+            <!-- General Settings -->
+            <div class="config-section">
+                <div class="section-title collapsed" onclick="toggleSection(this)">
+                    <span class="icon">📻</span>
+                    General Settings
+                    <span class="collapse-icon">▼</span>
+                </div>
+                
+                <div class="section-content collapsed">
+                <div class="form-group">
+                    <label for="MACADDRESS">Bluetooth MAC Address</label>
+                    <input type="text" id="MACADDRESS" name="MACADDRESS" placeholder="XX:XX:XX:XX:XX:XX">
+                    <div class="hint">MAC address of your Bluetooth radio</div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="CALLSIGN">Callsign</label>
+                    <input type="text" id="CALLSIGN" name="CALLSIGN" placeholder="e.g., KK7VZT">
+                    <div class="hint">Your amateur radio callsign</div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="BBS_STATION_ID">BBS Station ID</label>
+                        <input type="number" id="BBS_STATION_ID" name="BBS_STATION_ID" min="0" max="15">
+                        <div class="hint">Station ID for BBS (0-15)</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="ECHO_STATION_ID">Echo Station ID</label>
+                        <input type="number" id="ECHO_STATION_ID" name="ECHO_STATION_ID" min="0" max="15">
+                        <div class="hint">Station ID for Echo server (0-15)</div>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="WEBSERVERPORT">Web Server Port</label>
+                    <input type="number" id="WEBSERVERPORT" name="WEBSERVERPORT" min="1" max="65535">
+                    <div class="hint">HTTP port for web interface</div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="CONSOLEMSG">Console Messages</label>
+                    <input type="text" id="CONSOLEMSG" name="CONSOLEMSG" placeholder="ALL, NONE, or comma-separated list">
+                    <div class="hint">Categories: App, Radio, RadioCtl, MQTT, WebServer, BBS, APRS, WinLink, Echo, Storage, YAPP, Session, Bulletin, Files, Mail, Joke</div>
+                </div>
+                </div>
+            </div>
+            
+            <!-- WinLink Settings -->
+            <!-- WinLink Settings -->
+            <div class="config-section" id="winlinkSection">
+                <div class="section-title collapsed" onclick="toggleSection(this)">
+                    <span class="icon">📧</span>
+                    WinLink Gateway
+                    <span class="section-toggle" id="winlinkToggle"></span>
+                    <span class="collapse-icon">▼</span>
+                </div>
+                
+                <div class="section-content collapsed">
+                <div class="form-group">
+                    <label for="WINLINK_STATION_ID">WinLink Station ID</label>
+                    <input type="number" id="WINLINK_STATION_ID" name="WINLINK_STATION_ID" min="0" max="15">
+                    <div class="hint">Set to 0 to disable WinLink gateway</div>
+                </div>
+                
+                <div id="winlinkFields">
+                    <div class="form-group">
+                        <label for="WINLINK_PASSWORD">WinLink Password</label>
+                        <input type="password" id="WINLINK_PASSWORD" name="WINLINK_PASSWORD">
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="WINLINK_SERVER">WinLink Server</label>
+                            <input type="text" id="WINLINK_SERVER" name="WINLINK_SERVER" placeholder="server.winlink.org">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="WINLINK_PORT">WinLink Port</label>
+                            <input type="number" id="WINLINK_PORT" name="WINLINK_PORT" min="1" max="65535">
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="WINLINK_USE_TLS" name="WINLINK_USE_TLS">
+                            <label for="WINLINK_USE_TLS">Use TLS encryption</label>
+                        </div>
+                    </div>
+                </div>
+                </div>
+            </div>
+            
+            <!-- MQTT Settings -->
+            <div class="config-section" id="mqttSection">
+                <div class="section-title collapsed" onclick="toggleSection(this)">
+                    <span class="icon">🏠</span>
+                    MQTT / Home Assistant
+                    <span class="section-toggle" id="mqttToggle"></span>
+                    <span class="collapse-icon">▼</span>
+                </div>
+                
+                <div class="section-content collapsed">
+                <div class="form-group">
+                    <label for="MQTT_BROKER_URL">MQTT Broker URL</label>
+                    <input type="text" id="MQTT_BROKER_URL" name="MQTT_BROKER_URL" placeholder="mqtt://192.168.1.100:1883">
+                    <div class="hint">Leave empty to disable MQTT integration</div>
+                </div>
+                
+                <div id="mqttFields">
+                    <div class="form-group">
+                        <label for="MQTT_TOPIC">MQTT Topic</label>
+                        <input type="text" id="MQTT_TOPIC" name="MQTT_TOPIC" placeholder="homeassistant/uvpro-radio">
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="MQTT_USERNAME">MQTT Username</label>
+                            <input type="text" id="MQTT_USERNAME" name="MQTT_USERNAME">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="MQTT_PASSWORD">MQTT Password</label>
+                            <input type="password" id="MQTT_PASSWORD" name="MQTT_PASSWORD">
+                        </div>
+                    </div>
+                </div>
+                </div>
+            </div>
+            
+            <!-- Authentication -->
+            <div class="config-section">
+                <div class="section-title collapsed" onclick="toggleSection(this)">
+                    <span class="icon">🔐</span>
+                    Station Authentication
+                    <span class="collapse-icon">▼</span>
+                </div>
+                
+                <div class="section-content collapsed">
+                <p style="font-size: 13px; color: #888; margin-bottom: 16px;">
+                    Define callsigns and passwords for authenticated access to BBS features.
+                </p>
+                
+                <div class="auth-list" id="authList">
+                    <!-- Auth entries will be added here dynamically -->
+                </div>
+                
+                <button type="button" class="add-auth-btn" onclick="addAuthEntry()">+ Add Authentication</button>
+                </div>
+            </div>
+            
+            <!-- Actions -->
+            <div class="button-group">
+                <button type="button" class="btn btn-secondary" onclick="loadConfig()">Reset</button>
+                <button type="submit" class="btn btn-primary" id="saveBtn">Save Configuration</button>
+            </div>
+        </form>
+        
+        <footer>
+            <p>HtStation &copy; 2026 &bull; <a href="https://github.com/Ylianst/HtStation" target="_blank">GitHub</a></p>
+        </footer>
+    </div>
+    
+    <script>
+        let originalConfig = {};
+        
+        // Load configuration on page load
+        document.addEventListener('DOMContentLoaded', loadConfig);
+        
+        // Handle form submission
+        document.getElementById('configForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await saveConfig();
+        });
+        
+        // Update section states when key fields change
+        document.getElementById('WINLINK_STATION_ID').addEventListener('input', updateWinlinkState);
+        document.getElementById('MQTT_BROKER_URL').addEventListener('input', updateMqttState);
+        
+        async function loadConfig() {
+            const loadingState = document.getElementById('loadingState');
+            const configForm = document.getElementById('configForm');
+            const statusMessage = document.getElementById('statusMessage');
+            
+            loadingState.style.display = 'block';
+            configForm.style.display = 'none';
+            statusMessage.className = 'status-message';
+            
+            try {
+                const response = await fetch('/api/config');
+                if (!response.ok) {
+                    throw new Error('Failed to load configuration');
+                }
+                
+                const config = await response.json();
+                originalConfig = config;
+                
+                // Populate form fields
+                populateForm(config);
+                
+                // Update section states
+                updateWinlinkState();
+                updateMqttState();
+                
+                loadingState.style.display = 'none';
+                configForm.style.display = 'block';
+                
+            } catch (error) {
+                loadingState.style.display = 'none';
+                statusMessage.textContent = 'Error loading configuration: ' + error.message;
+                statusMessage.className = 'status-message error';
+            }
+        }
+        
+        function populateForm(config) {
+            // Simple fields
+            const simpleFields = [
+                'MACADDRESS', 'CALLSIGN', 'BBS_STATION_ID', 'ECHO_STATION_ID',
+                'WINLINK_STATION_ID', 'WINLINK_PASSWORD', 'WINLINK_SERVER', 'WINLINK_PORT',
+                'MQTT_BROKER_URL', 'MQTT_TOPIC', 'MQTT_USERNAME', 'MQTT_PASSWORD',
+                'WEBSERVERPORT', 'CONSOLEMSG'
+            ];
+            
+            for (const field of simpleFields) {
+                const input = document.getElementById(field);
+                if (input) {
+                    input.value = config[field] || '';
+                }
+            }
+            
+            // Checkbox fields
+            document.getElementById('WINLINK_USE_TLS').checked = 
+                config.WINLINK_USE_TLS === 'true' || config.WINLINK_USE_TLS === true;
+            
+            // Auth entries
+            const authList = document.getElementById('authList');
+            authList.innerHTML = '';
+            
+            const authEntries = config.AUTH || [];
+            if (authEntries.length === 0) {
+                addAuthEntry();
+            } else {
+                for (const entry of authEntries) {
+                    const [callsign, password] = entry.split(',');
+                    addAuthEntry(callsign, password);
+                }
+            }
+        }
+        
+        function addAuthEntry(callsign = '', password = '') {
+            const authList = document.getElementById('authList');
+            const entry = document.createElement('div');
+            entry.className = 'auth-entry';
+            entry.innerHTML = `
+                <input type="text" placeholder="Callsign" value="${escapeHtml(callsign)}" class="auth-callsign">
+                <input type="password" placeholder="Password" value="${escapeHtml(password)}" class="auth-password">
+                <button type="button" class="remove-btn" onclick="removeAuthEntry(this)">✕</button>
+            `;
+            authList.appendChild(entry);
+        }
+        
+        function removeAuthEntry(btn) {
+            const entry = btn.parentElement;
+            const authList = document.getElementById('authList');
+            
+            // Keep at least one entry
+            if (authList.children.length > 1) {
+                entry.remove();
+            } else {
+                // Clear the fields instead
+                entry.querySelector('.auth-callsign').value = '';
+                entry.querySelector('.auth-password').value = '';
+            }
+        }
+        
+        function updateWinlinkState() {
+            const stationId = parseInt(document.getElementById('WINLINK_STATION_ID').value) || 0;
+            const fields = document.getElementById('winlinkFields');
+            const toggle = document.getElementById('winlinkToggle');
+            
+            if (stationId === 0) {
+                fields.classList.add('section-disabled');
+                toggle.textContent = '(Disabled)';
+                
+                // Disable inputs
+                fields.querySelectorAll('input').forEach(input => input.disabled = true);
+            } else {
+                fields.classList.remove('section-disabled');
+                toggle.textContent = '';
+                
+                // Enable inputs
+                fields.querySelectorAll('input').forEach(input => input.disabled = false);
+            }
+        }
+        
+        function updateMqttState() {
+            const brokerUrl = document.getElementById('MQTT_BROKER_URL').value.trim();
+            const fields = document.getElementById('mqttFields');
+            const toggle = document.getElementById('mqttToggle');
+            
+            if (!brokerUrl) {
+                fields.classList.add('section-disabled');
+                toggle.textContent = '(Disabled)';
+                
+                // Disable inputs
+                fields.querySelectorAll('input').forEach(input => input.disabled = true);
+            } else {
+                fields.classList.remove('section-disabled');
+                toggle.textContent = '';
+                
+                // Enable inputs
+                fields.querySelectorAll('input').forEach(input => input.disabled = false);
+            }
+        }
+        
+        async function saveConfig() {
+            const saveBtn = document.getElementById('saveBtn');
+            const statusMessage = document.getElementById('statusMessage');
+            
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving...';
+            
+            try {
+                // Gather form data
+                const config = {};
+                
+                // Simple fields
+                const simpleFields = [
+                    'MACADDRESS', 'CALLSIGN', 'BBS_STATION_ID', 'ECHO_STATION_ID',
+                    'WINLINK_STATION_ID', 'WINLINK_PASSWORD', 'WINLINK_SERVER', 'WINLINK_PORT',
+                    'MQTT_BROKER_URL', 'MQTT_TOPIC', 'MQTT_USERNAME', 'MQTT_PASSWORD',
+                    'WEBSERVERPORT', 'CONSOLEMSG'
+                ];
+                
+                for (const field of simpleFields) {
+                    const input = document.getElementById(field);
+                    if (input && input.value.trim()) {
+                        config[field] = input.value.trim();
+                    }
+                }
+                
+                // Checkbox fields
+                config.WINLINK_USE_TLS = document.getElementById('WINLINK_USE_TLS').checked ? 'true' : 'false';
+                
+                // Auth entries
+                const authEntries = [];
+                document.querySelectorAll('.auth-entry').forEach(entry => {
+                    const callsign = entry.querySelector('.auth-callsign').value.trim();
+                    const password = entry.querySelector('.auth-password').value.trim();
+                    if (callsign && password) {
+                        authEntries.push(`${callsign},${password}`);
+                    }
+                });
+                config.AUTH = authEntries;
+                
+                const response = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(config)
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to save configuration');
+                }
+                
+                statusMessage.textContent = 'Configuration saved successfully! Restart HtStation to apply changes.';
+                statusMessage.className = 'status-message warning';
+                
+                // Reload config to show current state
+                await loadConfig();
+                
+            } catch (error) {
+                statusMessage.textContent = 'Error saving configuration: ' + error.message;
+                statusMessage.className = 'status-message error';
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save Configuration';
+            }
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function toggleSection(titleElement) {
+            const content = titleElement.nextElementSibling;
+            const isCollapsed = titleElement.classList.contains('collapsed');
+            
+            if (isCollapsed) {
+                // Expand
+                titleElement.classList.remove('collapsed');
+                content.classList.remove('collapsed');
+                // Set max-height for animation
+                content.style.maxHeight = content.scrollHeight + 'px';
+            } else {
+                // Collapse
+                titleElement.classList.add('collapsed');
+                content.classList.add('collapsed');
+                content.style.maxHeight = '0';
+            }
+        }
+        
+        function expandAllSections() {
+            document.querySelectorAll('.section-title').forEach(title => {
+                title.classList.remove('collapsed');
+                const content = title.nextElementSibling;
+                content.classList.remove('collapsed');
+                content.style.maxHeight = content.scrollHeight + 'px';
+            });
+        }
+    </script>
+</body>
+</html>
